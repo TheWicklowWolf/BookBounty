@@ -81,6 +81,9 @@ class Data_Handler:
                         if ret == "Success":
                             self.download_list[self.index]["Status"] = "Download Complete"
                             break
+                        elif ret == "Already Exists":
+                            self.download_list[self.index]["Status"] = "File Already Exists"
+                            break
                     else:
                         self.download_list[self.index]["Status"] = ret
                         self.index += 1
@@ -203,15 +206,24 @@ class Data_Handler:
 
             # Download file
             final_file_name = re.sub(r'[\\/*?:"<>|]', " ", self.downloaded_item_name)
+            author_name, book_title = final_file_name.split(" -- ", 1)
+            author_name = author_name.title()
             final_file_name = final_file_name.replace(" -- ", " - ")
-            file_path = os.path.join(self.directory_name, final_file_name + file_type)
+            file_path = os.path.join(self.directory_name, author_name, book_title, author_name + " - " + book_title + file_type)
             self.download_list[self.index]["Status"] = "Downloading"
-            with open(file_path, "wb") as f:
-                for chunk in dl_resp.iter_content(chunk_size=1024):
-                    if self.stop_downloading_event.is_set():
-                        raise Exception("Cancelled")
-                    f.write(chunk)
-            logger.info("Downloaded: " + link_url + " to " + final_file_name)
+
+            if os.path.exists(file_path):
+                logger.info("File already exists: " + file_path)
+                self.download_list[self.index]["Status"] = "File Already Exists"
+                return "Already Exists"
+            else:
+                os.makedirs(os.path.dirname(file_path), exist_ok=True)
+                with open(file_path, "wb") as f:
+                    for chunk in dl_resp.iter_content(chunk_size=1024):
+                        if self.stop_downloading_event.is_set():
+                            raise Exception("Cancelled")
+                        f.write(chunk)
+                logger.info("Downloaded: " + link_url + " to " + final_file_name)
             return "Success"
         else:
             return str(dl_resp.status_code) + " : " + dl_resp.text
