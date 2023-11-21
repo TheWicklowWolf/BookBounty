@@ -16,7 +16,6 @@ class Data_Handler:
         self.readarrApiKey = readarrAPIKey
         self.libgenSearchType = "/fiction/?q="
         self.libgenSearchBase = libgenAddress
-        self.downloaded_item_name = ""
         self.directory_name = "downloads"
         os.makedirs(self.directory_name, exist_ok=True)
         self.readarrMaxTags = 250
@@ -72,20 +71,21 @@ class Data_Handler:
         try:
             while not self.stop_downloading_event.is_set() and self.index < len(self.download_list):
                 self.status = "Running"
-                search_results = self.search_libgen(self.download_list[self.index])
+                req_book = self.download_list[self.index]
+                search_results = self.search_libgen(req_book)
                 if search_results:
-                    self.download_list[self.index]["Status"] = "Link Found"
-                    self.downloaded_item_name = self.download_list[self.index]["Item"]
+                    req_book["Status"] = "Link Found"
+
                     for link in search_results:
-                        ret = self.download_from_libgen(link)
+                        ret = self.download_from_libgen(req_book, link)
                         if ret == "Success":
-                            self.download_list[self.index]["Status"] = "Download Complete"
+                            req_book["Status"] = "Download Complete"
                             break
                         elif ret == "Already Exists":
-                            self.download_list[self.index]["Status"] = "File Already Exists"
+                            req_book["Status"] = "File Already Exists"
                             break
                     else:
-                        self.download_list[self.index]["Status"] = ret
+                        req_book["Status"] = ret
                         self.index += 1
                         continue
                 else:
@@ -135,7 +135,7 @@ class Data_Handler:
                     download_links = s.resolve_download_links(item_to_download)
                     found_links = [value for value in download_links.values()]
                 else:
-                    book["Status"] = " No Link Found"
+                    book["Status"] = "No Link Found"
 
             else:
                 search_item = cleaned_string.replace(" ", "+")
@@ -153,12 +153,15 @@ class Data_Handler:
                                 found_links.append(href)
 
                     if not found_links:
-                        book["Status"] = " No Link Found"
-
+                        book["Status"] = "No Link Found"
+                    else:
+                        ret = {"Status": "Success", "Data": "Found Links"}
+                        socketio.emit("libgen_status", ret)
                 else:
-                    ret = {"Status": "Error", "Code": "Libgen Connection Error"}
-                    logger.error("Libgen Connection Error: " + str(response.status_code) + "Data: " + response.text)
+                    ret = {"Status": "Error", "Data": "Libgen Connection Error"}
+                    logger.error("Libgen Connection Error: " + str(response.status_code) + " Data: " + response.text)
                     socketio.emit("libgen_status", ret)
+                    book["Status"] = "Libgen DB Error"
 
         except Exception as e:
             logger.error(str(e))
@@ -167,7 +170,7 @@ class Data_Handler:
         finally:
             return found_links
 
-    def download_from_libgen(self, link):
+    def download_from_libgen(self, req_book, link):
         if "non-fiction" in self.libgenSearchType:
             link_url = link
         else:
@@ -196,36 +199,42 @@ class Data_Handler:
             else:
                 return str(response.status_code) + " : " + response.text
 
+        req_book["Status"] = "Checking Link"
+        file_type = os.path.splitext(link_url)[1]
+        valid_book_extensions = [".pdf", ".epub", ".mobi", ".azw", ".djvu"]
+        if file_type not in valid_book_extensions:
+            return "Wrong File Type"
+
+        final_file_name = re.sub(r'[\\/*?:"<>|]', " ", req_book["Item"])
+        author_name, book_title = final_file_name.split(" -- ", 1)
+        author_name = author_name.title()
+        final_file_name = final_file_name.replace(" -- ", " - ")
+        file_path = os.path.join(self.directory_name, author_name, book_title, author_name + " - " + book_title + file_type)
+
+        if os.path.exists(file_path):
+            logger.info("File already exists: " + file_path)
+            req_book["Status"] = "File Already Exists"
+            return "Already Exists"
+        else:
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
         dl_resp = requests.get(link_url, stream=True)
 
+        if self.stop_downloading_event.is_set():
+            raise Exception("Cancelled")
+
         if dl_resp.status_code == 200:
-            file_type = os.path.splitext(link_url)[1]
-            valid_book_extensions = [".pdf", ".epub", ".mobi", ".azw", ".djvu"]
-            if file_type not in valid_book_extensions:
-                return "Wrong File Type"
-
             # Download file
-            final_file_name = re.sub(r'[\\/*?:"<>|]', " ", self.downloaded_item_name)
-            author_name, book_title = final_file_name.split(" -- ", 1)
-            author_name = author_name.title()
-            final_file_name = final_file_name.replace(" -- ", " - ")
-            file_path = os.path.join(self.directory_name, author_name, book_title, author_name + " - " + book_title + file_type)
-            self.download_list[self.index]["Status"] = "Downloading"
-
-            if os.path.exists(file_path):
-                logger.info("File already exists: " + file_path)
-                self.download_list[self.index]["Status"] = "File Already Exists"
-                return "Already Exists"
-            else:
-                os.makedirs(os.path.dirname(file_path), exist_ok=True)
-                with open(file_path, "wb") as f:
-                    for chunk in dl_resp.iter_content(chunk_size=1024):
-                        if self.stop_downloading_event.is_set():
-                            raise Exception("Cancelled")
-                        f.write(chunk)
-                logger.info("Downloaded: " + link_url + " to " + final_file_name)
+            req_book["Status"] = "Downloading"
+            with open(file_path, "wb") as f:
+                for chunk in dl_resp.iter_content(chunk_size=1024):
+                    if self.stop_downloading_event.is_set():
+                        raise Exception("Cancelled")
+                    f.write(chunk)
+            logger.info("Downloaded: " + link_url + " to " + final_file_name)
             return "Success"
         else:
+            req_book["Status"] = "Download Error"
             return str(dl_resp.status_code) + " : " + dl_resp.text
 
     def monitor(self):
@@ -234,6 +243,12 @@ class Data_Handler:
             custom_data = {"Data": self.download_list, "Status": self.status, "Percent_Completion": self.percent_completion}
             socketio.emit("progress_status", custom_data)
             self.stop_monitoring_event.wait(1)
+
+    def cancel_downloads(self):
+        self.stop_readarr_event.set()
+        self.stop_downloading_event.set()
+        for item in self.download_list[self.index :]:
+            item["Status"] = "Download Cancelled"
 
 
 app = Flask(__name__)
@@ -329,15 +344,15 @@ def disconnect():
 
 @socketio.on("stopper")
 def stopper():
-    data_handler.stop_readarr_event.set()
-    data_handler.stop_downloading_event.set()
-    for item in data_handler.download_list[data_handler.index :]:
-        item["Status"] = "Download Cancelled"
+    if data_handler.download_list:
+        ret = {"Status": "Error", "Data": "Stopping"}
+        socketio.emit("libgen_status", ret)
+    data_handler.cancel_downloads()
 
 
 @socketio.on("reset")
 def reset():
-    stopper()
+    data_handler.cancel_downloads()
     data_handler.reset()
     custom_data = {"Data": data_handler.download_list, "Status": data_handler.status, "Percent_Completion": data_handler.percent_completion}
     socketio.emit("progress_status", custom_data)
