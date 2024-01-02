@@ -6,3 +6,4 @@ flask_socketio
 bs4
 requests
 libgen_api
+unidecode

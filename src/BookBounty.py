@@ -8,6 +8,7 @@ from flask import Flask, render_template
 from flask_socketio import SocketIO
 from bs4 import BeautifulSoup
 from libgen_api import LibgenSearch
+import unidecode
 
 
 class Data_Handler:
@@ -45,12 +46,12 @@ class Data_Handler:
             response = requests.get(endpoint, params=params, timeout=self.readarrApiTimeout)
             if response.status_code == 200:
                 wanted_missing = response.json()
-                for album in wanted_missing["records"]:
-                    title = album["title"]
-                    author_and_title = album["authorTitle"]
+                for wanted_book in wanted_missing["records"]:
+                    title = wanted_book["title"]
+                    author_and_title = wanted_book["authorTitle"]
                     author_reversed = author_and_title.replace(title, "")
                     author_with_sep = author_reversed.split(", ")
-                    author = "".join(reversed(author_with_sep))
+                    author = "".join(reversed(author_with_sep)).title()
                     self.readarr_items.append(author + " -- " + title)
                 self.readarr_items.sort()
                 ret = {"Status": "Success", "Data": self.readarr_items}
@@ -122,10 +123,9 @@ class Data_Handler:
             item = book["Item"]
             author_name, book_title = item.split(" -- ", 1)
             found_links = []
-            non_standard_chars_pattern = r"[^a-zA-Z0-9\s.]"
-            item = item.replace("ø", "o")
-            cleaned_string = re.sub(non_standard_chars_pattern, "", item)
-            cleaned_string = re.sub(r"\s+", " ", cleaned_string)
+            normalised_string = unidecode.unidecode(item)
+            temp_string = normalised_string.replace("--", "")
+            cleaned_string = re.sub(r"\s+", " ", temp_string).strip()
 
             if "non-fiction" in self.libgenSearchType:
                 s = LibgenSearch()
@@ -173,8 +173,10 @@ class Data_Handler:
 
     def download_from_libgen(self, req_book, link):
         if "non-fiction" in self.libgenSearchType:
+            valid_book_extensions = [".pdf", ".epub", ".mobi", ".azw", ".djvu"]
             link_url = link
         else:
+            valid_book_extensions = [".epub", ".mobi", ".azw", ".djvu"]
             response = requests.get(link, timeout=self.http_timeout)
             if response.status_code == 200:
                 soup = BeautifulSoup(response.text, "html.parser")
@@ -202,7 +204,6 @@ class Data_Handler:
 
         req_book["Status"] = "Checking Link"
         file_type = os.path.splitext(link_url)[1]
-        valid_book_extensions = [".pdf", ".epub", ".mobi", ".azw", ".djvu"]
         if file_type not in valid_book_extensions:
             return "Wrong File Type"
 
