@@ -41,7 +41,7 @@ class Data_Handler:
             self.stop_readarr_event.clear()
             self.readarr_items = []
             endpoint = f"{self.readarrAddress}/api/v1/wanted/missing"
-            params = {"apikey": self.readarrApiKey, "pageSize": self.readarrMaxTags, "sortKey": "title", "sortDir": "asc"}
+            params = {"apikey": self.readarrApiKey, "pageSize": self.readarrMaxTags, "sortKey": "title", "sortDirection": "ascending"}
             response = requests.get(endpoint, params=params, timeout=self.readarrApiTimeout)
             if response.status_code == 200:
                 wanted_missing = response.json()
@@ -52,6 +52,7 @@ class Data_Handler:
                     author_with_sep = author_reversed.split(", ")
                     author = "".join(reversed(author_with_sep))
                     self.readarr_items.append(author + " -- " + title)
+                self.readarr_items.sort()
                 ret = {"Status": "Success", "Data": self.readarr_items}
             else:
                 ret = {"Status": "Error", "Code": response.status_code, "Data": response.text}
