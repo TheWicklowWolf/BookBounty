@@ -42,4 +42,3 @@ services:
 ---
 
 https://hub.docker.com/r/thewicklowwolf/bookbounty
-
