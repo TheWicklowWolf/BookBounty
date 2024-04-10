@@ -12,7 +12,6 @@ Web GUI for finding missing Readarr books.
 ## Run using docker-compose
 
 ```yaml
-version: "2.1"
 services:
   bookbounty:
     image: thewicklowwolf/bookbounty:latest
