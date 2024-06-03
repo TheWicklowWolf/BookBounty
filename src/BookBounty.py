@@ -12,11 +12,12 @@ import unidecode
 
 
 class Data_Handler:
-    def __init__(self, readarrAddress, readarrAPIKey, libgenAddress):
+    def __init__(self, readarrAddress, readarrAPIKey, libgenAddress, selectedPathType):
         self.readarrAddress = readarrAddress
         self.readarrApiKey = readarrAPIKey
         self.libgenSearchType = "/fiction/?q="
         self.libgenSearchBase = libgenAddress
+        self.selectedPathType = selectedPathType
         self.directory_name = "downloads"
         os.makedirs(self.directory_name, exist_ok=True)
         self.readarrMaxTags = 250
@@ -211,14 +212,19 @@ class Data_Handler:
         author_name, book_title = final_file_name.split(" -- ", 1)
         author_name = author_name.title()
         final_file_name = final_file_name.replace(" -- ", " - ")
-        file_path = os.path.join(self.directory_name, author_name, book_title, author_name + " - " + book_title + file_type)
+        if self.selectedPathType == "file":
+            file_path = os.path.join(self.directory_name, author_name + " - " + book_title + file_type)
+
+        elif self.selectedPathType == "folder":
+            file_path = os.path.join(self.directory_name, author_name, book_title, author_name + " - " + book_title + file_type)
 
         if os.path.exists(file_path):
             logger.info("File already exists: " + file_path)
             req_book["Status"] = "File Already Exists"
             return "Already Exists"
         else:
-            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            if self.selectedPathType == "folder":
+                os.makedirs(os.path.dirname(file_path), exist_ok=True)
 
         dl_resp = requests.get(link_url, stream=True)
 
@@ -263,8 +269,9 @@ logger = logging.getLogger()
 readarrAddress = os.environ.get("readarr_address", "http://192.168.1.2:8787")
 readarrAPIKey = os.environ.get("readarr_api_key", "XYZ0123456789")
 libgenAddress = os.environ.get("libgen_address", "http://libgen.is")
+selectedPathType = os.environ.get("selected_path_type", "folder")
 
-data_handler = Data_Handler(readarrAddress, readarrAPIKey, libgenAddress)
+data_handler = Data_Handler(readarrAddress, readarrAPIKey, libgenAddress, selectedPathType)
 
 
 @app.route("/")
