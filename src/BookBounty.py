@@ -206,23 +206,50 @@ class Data_Handler:
                     else:
                         return "Dead Link"
                 else:
-                    elements_with_get = soup.find_all(string=lambda text: "GET" in text)
-
-                    for element_text in elements_with_get:
-                        parent_element = element_text.parent
-                        download_link = parent_element.find("a") if parent_element else None
-                        if download_link:
-                            link_url = download_link.get("href")
-                            break
+                    table = soup.find("table")
+                    if table:
+                        rows = table.find_all("tr")
+                        for row in rows:
+                            if "GET" in row.get_text():
+                                download_link = row.find("a")
+                                if download_link:
+                                    link_text = download_link.get("href")
+                                    if "http" not in link_text:
+                                        link_url = "https://libgen.li/" + link_text
+                                    else:
+                                        link_url = link_text
+                                    break
+                        else:
+                            return "Dead Link"
                     else:
-                        return "Dead Link"
+                        return "No Link Available"
+
             else:
                 return str(response.status_code) + " : " + response.text
 
         req_book["Status"] = "Checking Link"
-        file_type = os.path.splitext(link_url)[1]
-        if file_type not in valid_book_extensions:
-            return "Wrong File Type"
+        try:
+            file_type = None
+            try:
+                file_type_from_link = os.path.splitext(link_url)[1]
+                if file_type_from_link in valid_book_extensions:
+                    file_type = file_type_from_link
+            except:
+                logger.info("File extension not in url or invalid, checking link content...")
+
+            finally:
+                dl_resp = requests.get(link_url, stream=True)
+                if file_type == None:
+                    link_file_name_text = dl_resp.headers.get("content-disposition")
+                    for ext in [".epub", ".mobi", ".azw3", ".djvu"]:
+                        if ext in link_file_name_text.lower():
+                            file_type = ext
+                            break
+                    else:
+                        return "Wrong File Type"
+
+        except:
+            return "Unknown File Type"
 
         final_file_name = re.sub(r'[\\/*?:"<>|]', " ", req_book["Item"])
         author_name, book_title = final_file_name.split(" -- ", 1)
@@ -241,8 +268,6 @@ class Data_Handler:
         else:
             if self.selectedPathType == "folder":
                 os.makedirs(os.path.dirname(file_path), exist_ok=True)
-
-        dl_resp = requests.get(link_url, stream=True)
 
         if self.stop_downloading_event.is_set():
             raise Exception("Cancelled")
