@@ -12,12 +12,13 @@ import unidecode
 
 
 class Data_Handler:
-    def __init__(self, readarrAddress, readarrAPIKey, libgenAddress, selectedPathType):
+    def __init__(self, readarrAddress, readarrAPIKey, libgenAddress, selectedPathType, selectedLanguage):
         self.readarrAddress = readarrAddress
         self.readarrApiKey = readarrAPIKey
         self.libgenSearchType = "/fiction/?q="
         self.libgenSearchBase = libgenAddress
         self.selectedPathType = selectedPathType
+        self.selectedLanguage = selectedLanguage
         self.directory_name = "downloads"
         os.makedirs(self.directory_name, exist_ok=True)
         self.readarrMaxTags = 250
@@ -145,14 +146,29 @@ class Data_Handler:
                 response = requests.get(url, timeout=self.http_timeout)
                 if response.status_code == 200:
                     soup = BeautifulSoup(response.text, "html.parser")
-                    elements = soup.find_all(class_="record_mirrors_compact")
+                    rows = soup.find("tbody").find_all("tr")
 
-                    for element in elements:
-                        links = element.find_all("a", href=True)
-                        for link in links:
-                            href = link["href"]
-                            if href.startswith("http://") or href.startswith("https://"):
-                                found_links.append(href)
+                    for row in rows:
+                        try:
+                            try:
+                                language = row.find_all("td")[3].get_text().strip()
+                            except:
+                                language = "english"
+                            try:
+                                file_type = row.find_all("td")[4].get_text().strip()
+                            except:
+                                file_type = "EPUB"
+                            file_type_check = any(ft in file_type for ft in ["EPUB", "MOBI", "AZW3", "DJVU"])
+                            language_check = language.lower() == self.selectedLanguage or self.selectedLanguage == "all"
+                            if file_type_check and language_check:
+                                mirrors = row.find("ul", class_="record_mirrors_compact")
+                                links = mirrors.find_all("a", href=True)
+                                for link in links:
+                                    href = link["href"]
+                                    if href.startswith("http://") or href.startswith("https://"):
+                                        found_links.append(href)
+                        except:
+                            pass
 
                     if not found_links:
                         book["Status"] = "No Link Found"
@@ -174,10 +190,10 @@ class Data_Handler:
 
     def download_from_libgen(self, req_book, link):
         if "non-fiction" in self.libgenSearchType:
-            valid_book_extensions = [".pdf", ".epub", ".mobi", ".azw", ".djvu"]
+            valid_book_extensions = [".pdf", ".epub", ".mobi", ".azw3", ".djvu"]
             link_url = link
         else:
-            valid_book_extensions = [".epub", ".mobi", ".azw", ".djvu"]
+            valid_book_extensions = [".epub", ".mobi", ".azw3", ".djvu"]
             response = requests.get(link, timeout=self.http_timeout)
             if response.status_code == 200:
                 soup = BeautifulSoup(response.text, "html.parser")
@@ -239,8 +255,12 @@ class Data_Handler:
                     if self.stop_downloading_event.is_set():
                         raise Exception("Cancelled")
                     f.write(chunk)
-            logger.info("Downloaded: " + link_url + " to " + final_file_name)
-            return "Success"
+            if os.path.exists(file_path):
+                logger.info("Downloaded: " + link_url + " to " + final_file_name)
+                return "Success"
+            else:
+                logger.info("Downloaded file not found in Directory")
+                return "Failed"
         else:
             req_book["Status"] = "Download Error"
             return str(dl_resp.status_code) + " : " + dl_resp.text
@@ -269,9 +289,10 @@ logger = logging.getLogger()
 readarrAddress = os.environ.get("readarr_address", "http://192.168.1.2:8787")
 readarrAPIKey = os.environ.get("readarr_api_key", "XYZ0123456789")
 libgenAddress = os.environ.get("libgen_address", "http://libgen.is")
-selectedPathType = os.environ.get("selected_path_type", "folder")
+selectedPathType = os.environ.get("selected_path_type", "folder").lower()
+selectedLanguage = os.environ.get("selected_language", "all").lower()
 
-data_handler = Data_Handler(readarrAddress, readarrAPIKey, libgenAddress, selectedPathType)
+data_handler = Data_Handler(readarrAddress, readarrAPIKey, libgenAddress, selectedPathType, selectedLanguage)
 
 
 @app.route("/")
