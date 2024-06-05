@@ -146,7 +146,11 @@ class Data_Handler:
                 response = requests.get(url, timeout=self.http_timeout)
                 if response.status_code == 200:
                     soup = BeautifulSoup(response.text, "html.parser")
-                    rows = soup.find("tbody").find_all("tr")
+                    table = soup.find("tbody")
+                    if table:
+                        rows = table.find_all("tr")
+                    else:
+                        rows = []
 
                     for row in rows:
                         try:
