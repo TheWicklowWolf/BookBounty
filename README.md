@@ -21,6 +21,7 @@ services:
     volumes:
       - /path/to/config:/bookbounty/config
       - /path/to/downloads:/bookbounty/downloads
+      - /etc/localtime:/etc/localtime:ro
     restart: unless-stopped
 
 ```
