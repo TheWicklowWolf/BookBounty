@@ -7,3 +7,4 @@ bs4
 requests
 libgen_api
 unidecode
+thefuzz
