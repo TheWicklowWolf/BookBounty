@@ -10,8 +10,7 @@ from flask import Flask, render_template
 from flask_socketio import SocketIO
 from bs4 import BeautifulSoup
 from thefuzz import fuzz
-
-##from libgen_api import LibgenSearch
+from libgen_api import LibgenSearch
 
 
 class DataHandler:
@@ -436,8 +435,9 @@ class DataHandler:
             return match_ratio
 
     def preprocess(self, name):
-        name = "".join(e for e in name if e.isalnum() or e.isspace()).lower()
-        words = name.split()
+        name_string = name.replace(".", " ").replace(":", " ").replace(",", " ")
+        new_string = "".join(e for e in name_string if e.isalnum() or e.isspace()).lower()
+        words = new_string.split()
         words.sort()
         return " ".join(words)
 
