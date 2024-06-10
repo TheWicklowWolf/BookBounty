@@ -377,6 +377,8 @@ class DataHandler:
                                 raw_title = cells[2].get_text().strip()
                                 if "\nISBN" in raw_title:
                                     title_string = raw_title.split("\nISBN")[0]
+                                elif "\nASIN" in raw_title:
+                                    title_string = raw_title.split("\nASIN")[0]
                                 else:
                                     title_string = raw_title
                             except:
