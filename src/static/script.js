@@ -1,216 +1,254 @@
-var readarrButton = document.getElementById('readarr_button');
-var readarrSpinner = document.getElementById('readarr_spinner');
-var readarrStatus = document.getElementById('readarr_status');
-var libgenSpinner = document.getElementById('libgen_spinner');
-var libgenStatus = document.getElementById('libgen_status');
-var libgenButton = document.getElementById('libgen_button');
-var stopButton = document.getElementById('libgen_button_stop');
-var resetButton = document.getElementById('libgen_button_reset');
-var readarrItemList = document.getElementById("readarrItemList");
-var selectAllCheckbox = document.getElementById("select-all");
-var selectAllContainer = document.getElementById("select-all-container");
-var progress_bar = document.getElementById('progress-status-bar');
-var libgenDataTable = document.getElementById('libgen-data-table').getElementsByTagName('tbody')[0];
-var configModal = document.getElementById('configModal');
-var saveMessage = document.getElementById("saveMessage");
-var saveChangesButton = document.getElementById("saveChangesBtn");
-const readarrApiKey = document.getElementById("readarrApiKey");
-const readarrMaxTags = document.getElementById("readarrMaxTags");
-const readarrApiTimeout = document.getElementById("readarrApiTimeout");
-const libgenSearchBase = document.getElementById("libgenSearchBase");
-const libgenSearchType = document.getElementById("libgenSearchType");
-const libgenSleepInterval = document.getElementById("libgenSleepInterval");
-var readarr_items = [];
+var get_wanted_readarr = document.getElementById('get-readarr-wanted-btn');
+var stop_readarr = document.getElementById('stop-readarr-btn');
+var reset_readarr = document.getElementById('reset-readarr-btn');
+var readarr_spinner = document.getElementById('readarr-spinner');
+var readarr_progress_bar = document.getElementById('readarr-progress-status-bar');
+var readarr_table = document.getElementById('readarr-table').getElementsByTagName('tbody')[0];
+var select_all_checkbox = document.getElementById("select-all-checkbox");
+
+var start_libgen = document.getElementById('start-libgen-btn');
+var stop_libgen = document.getElementById('stop-libgen-btn');
+var reset_libgen = document.getElementById('reset-libgen-btn');
+var libgen_progress_bar = document.getElementById('libgen-progress-status-bar');
+var libgen_table = document.getElementById('libgen-table').getElementsByTagName('tbody')[0];
+
+var config_modal = document.getElementById('config-modal');
+var save_message = document.getElementById("save-message");
+var save_changes_button = document.getElementById("save-changes-btn");
+const readarr_address = document.getElementById("readarr-address");
+const readarr_api_key = document.getElementById("readarr-api-key");
+const libgen_address = document.getElementById("libgen-address");
+const sleep_interval = document.getElementById("sleep-interval");
+const sync_schedule = document.getElementById("sync-schedule");
+const minimum_match_ratio = document.getElementById("minimum-match-ratio");
 var socket = io();
 
-selectAllCheckbox.addEventListener("change", function () {
-    var isChecked = this.checked;
+readarr_progress_bar.style.width = "0%";
+readarr_progress_bar.setAttribute("aria-valuenow", 0);
+
+function check_if_all_true() {
+    var all_checked = true;
     var checkboxes = document.querySelectorAll('input[name="readarr_item"]');
     checkboxes.forEach(function (checkbox) {
-        checkbox.checked = isChecked;
-    });
-});
-
-readarrButton.addEventListener('click', function () {
-    readarrButton.disabled = true;
-    readarrSpinner.style.display = "inline-flex";
-    readarrStatus.textContent = "Accessing Readarr";
-    readarrItemList.innerHTML = '';
-    socket.emit("readarr");
-});
-
-libgenButton.addEventListener('click', function () {
-    libgenButton.disabled = true;
-    libgenSpinner.style.display = "inline-flex";
-    var checkedItems = [];
-    for (var i = 0; i < readarr_items.length; i++) {
-        var checkbox = document.getElementById("readarr_" + i);
-        if (checkbox.checked) {
-            checkedItems.push(checkbox.value);
+        if (!checkbox.checked) {
+            all_checked = false;
         }
-    }
-    socket.emit("libgen", { "Data": checkedItems });
-});
-
-stopButton.addEventListener('click', function () {
-    socket.emit("stopper");
-});
-
-configModal.addEventListener('show.bs.modal', function (event) {
-    socket.emit("loadSettings");
-
-    function handleSettingsLoaded(settings) {
-        readarrApiKey.value = settings.readarrApiKey;
-        readarrMaxTags.value = settings.readarrMaxTags;
-        readarrApiTimeout.value = settings.readarrApiTimeout;
-        libgenSearchBase.value = settings.libgenSearchBase;
-        libgenSearchType.value = settings.libgenSearchType;
-        libgenSleepInterval.value = settings.libgenSleepInterval;
-        socket.off("settingsLoaded", handleSettingsLoaded);
-    }
-    socket.on("settingsLoaded", handleSettingsLoaded);
-});
-
-saveChangesButton.addEventListener("click", () => {
-    socket.emit("updateSettings", {
-        "readarrApiKey": readarrApiKey.value,
-        "readarrMaxTags": readarrMaxTags.value,
-        "readarrApiTimeout": readarrApiTimeout.value,
-        "libgenSearchBase": libgenSearchBase.value,
-        "libgenSearchType": libgenSearchType.value,
-        "libgenSleepInterval": libgenSleepInterval.value
     });
-    saveMessage.style.display = "block";
+    select_all_checkbox.checked = all_checked;
+}
+
+function update_progress_bar(percentage, status) {
+    libgen_progress_bar.style.width = percentage + "%";
+    libgen_progress_bar.setAttribute("aria-valuenow", percentage);
+    libgen_progress_bar.classList.remove("progress-bar-striped");
+    libgen_progress_bar.classList.remove("progress-bar-animated");
+
+    if (status === "running") {
+        libgen_progress_bar.classList.remove("bg-primary", "bg-danger", "bg-dark", "bg-warning");
+        libgen_progress_bar.classList.add("bg-success");
+        libgen_progress_bar.classList.add("progress-bar-animated");
+
+    } else if (status === "stopped") {
+        libgen_progress_bar.classList.remove("bg-primary", "bg-danger", "bg-success", "bg-dark");
+        libgen_progress_bar.classList.add("bg-warning");
+
+    } else if (status === "idle") {
+        libgen_progress_bar.classList.remove("bg-danger", "bg-success", "bg-primary", "bg-dark");
+        libgen_progress_bar.classList.add("bg-primary");
+
+    } else if (status === "complete") {
+        libgen_progress_bar.classList.remove("bg-primary", "bg-warning", "bg-success", "bg-danger");
+        libgen_progress_bar.classList.add("bg-dark");
+
+    } else if (status === "failed") {
+        libgen_progress_bar.classList.remove("bg-primary", "bg-success", "bg-warning", "bg-dark");
+        libgen_progress_bar.classList.add("bg-danger");
+    }
+    libgen_progress_bar.classList.add("progress-bar-striped");
+}
+
+select_all_checkbox.addEventListener("change", function () {
+    var is_checked = this.checked;
+    var checkboxes = document.querySelectorAll('input[name="readarr_item"]');
+    checkboxes.forEach(function (checkbox) {
+        checkbox.checked = is_checked;
+    });
+});
+
+get_wanted_readarr.addEventListener('click', function () {
+    get_wanted_readarr.disabled = true;
+    readarr_spinner.classList.remove('d-none');
+    readarr_table.innerHTML = '';
+    socket.emit("readarr_get_wanted");
+});
+
+stop_readarr.addEventListener('click', function () {
+    socket.emit("stop_readarr");
+    readarr_spinner.classList.add('d-none');
+    get_wanted_readarr.disabled = false;
+});
+
+reset_readarr.addEventListener('click', function () {
+    socket.emit("reset_readarr");
+    readarr_table.innerHTML = '';
+    readarr_spinner.classList.add('d-none');
+    get_wanted_readarr.disabled = false;
+});
+
+config_modal.addEventListener('show.bs.modal', function (event) {
+    socket.emit("load_settings");
+    function handle_settings_loaded(settings) {
+        readarr_address.value = settings.readarr_address;
+        readarr_api_key.value = settings.readarr_api_key;
+        libgen_address.value = settings.libgen_address;
+        sleep_interval.value = settings.sleep_interval;
+        sync_schedule.value = settings.sync_schedule.join(', ');
+        minimum_match_ratio.value = settings.minimum_match_ratio;
+        socket.off("settings_loaded", handle_settings_loaded);
+    }
+    socket.on("settings_loaded", handle_settings_loaded);
+});
+
+save_changes_button.addEventListener("click", () => {
+    socket.emit("update_settings", {
+        "readarr_address": readarr_address.value,
+        "readarr_api_key": readarr_api_key.value,
+        "libgen_address": libgen_address.value,
+        "sleep_interval": sleep_interval.value,
+        "sync_schedule": sync_schedule.value,
+        "minimum_match_ratio": minimum_match_ratio.value
+    });
+    save_message.style.display = "block";
     setTimeout(function () {
-        saveMessage.style.display = "none";
+        save_message.style.display = "none";
     }, 1000);
 });
 
-resetButton.addEventListener('click', function () {
-    socket.emit("reset");
-    libgenDataTable.innerHTML = '';
-    libgenSpinner.style.display = "none";
-    libgenStatus.textContent = "";
+start_libgen.addEventListener('click', function () {
+    start_libgen.disabled = true;
+    var checked_indices = [];
+    var checkboxes = document.getElementsByName("readarr_item");
+
+    checkboxes.forEach(function (checkbox, index) {
+        if (checkbox.checked) {
+            checked_indices.push(index);
+        }
+    });
+    socket.emit("add_to_download_list", checked_indices);
+    start_libgen.disabled = false;
 });
 
-socket.on("readarr_status", (response) => {
-    if (response.Status == "Success") {
-        readarrButton.disabled = false;
-        readarrStatus.textContent = "List Retrieved";
-        readarrSpinner.style.display = "none";
-        readarr_items = response.Data;
-        readarrItemList.innerHTML = '';
-        selectAllContainer.style.display = "block";
-        selectAllCheckbox.checked = false;
-        for (var i = 0; i < readarr_items.length; i++) {
-            var item = readarr_items[i];
+stop_libgen.addEventListener('click', function () {
+    socket.emit("stop_libgen");
+});
 
-            var div = document.createElement("div");
-            div.className = "form-check";
+reset_libgen.addEventListener('click', function () {
+    socket.emit("reset_libgen");
+    libgen_table.innerHTML = '';
+});
 
-            var input = document.createElement("input");
-            input.type = "checkbox";
-            input.className = "form-check-input";
-            input.id = "readarr_" + i;
-            input.name = "readarr_item";
-            input.value = item;
-
-            var label = document.createElement("label");
-            label.className = "form-check-label";
-            label.htmlFor = "readarr_" + i;
-            label.textContent = item;
-
-            input.addEventListener("change", function () {
-                selectAllCheckbox.checked = false;
-            });
-
-            div.appendChild(input);
-            div.appendChild(label);
-
-            readarrItemList.appendChild(div);
-        }
+socket.on("readarr_update", (response) => {
+    readarr_table.innerHTML = '';
+    var all_checked = true;
+    if (response.status == "busy") {
+        get_wanted_readarr.disabled = true;
+        readarr_spinner.classList.remove('d-none');
     }
     else {
-        readarrStatus.textContent = "";
-        var errorDiv = document.createElement("div");
-        errorDiv.textContent = response.Code + " : " + response.Data;
-        errorDiv.style.wordBreak = "break-all";
-        readarrItemList.appendChild(errorDiv);
-        readarrStatus.textContent = "Error Accessing Readarr";
+        get_wanted_readarr.disabled = false;
+        readarr_spinner.classList.add('d-none');
     }
-    readarrSpinner.style.display = "none";
-    readarrButton.disabled = false;
-});
 
-socket.on("libgen_status", (response) => {
-    if (response.Status == "Success") {
-        libgenSpinner.style.display = "none";
-        libgenStatus.textContent = "";
-    } else {
-        libgenStatus.textContent = response.Data;
-    }
-    libgenButton.disabled = false;
-});
+    select_all_checkbox.style.display = "block";
+    select_all_checkbox.checked = false;
 
-function updateProgressBar(percentage, status) {
-    progress_bar.style.width = percentage + "%";
-    progress_bar.ariaValueNow = percentage + "%";
-    progress_bar.classList.remove("progress-bar-striped");
-    progress_bar.classList.remove("progress-bar-animated");
+    response.data.forEach((item, i) => {
+        if (!item.checked) {
+            all_checked = false;
+        }
+        var row = readarr_table.insertRow();
 
-    if (status === "Running") {
-        progress_bar.classList.remove("bg-primary", "bg-danger", "bg-dark");
-        progress_bar.classList.add("bg-success");
-        progress_bar.classList.add("progress-bar-animated");
+        var cell1 = row.insertCell(0);
+        var cell2 = row.insertCell(1);
 
-    } else if (status === "Stopped") {
-        progress_bar.classList.remove("bg-primary", "bg-success", "bg-dark");
-        progress_bar.classList.add("bg-danger");
+        var checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.className = "form-check-input";
+        checkbox.id = "readarr_" + i;
+        checkbox.name = "readarr_item";
+        checkbox.checked = item.checked;
+        checkbox.addEventListener("change", function () {
+            check_if_all_true();
+        });
 
-    } else if (status === "Idle") {
-        progress_bar.classList.remove("bg-success", "bg-danger", "bg-dark");
-        progress_bar.classList.add("bg-primary");
+        var label = document.createElement("label");
+        label.className = "form-check-label";
+        label.htmlFor = "readarr_" + i;
+        label.textContent = `${item.author} - ${item.book_name}`;
 
-    } else if (status === "Complete") {
-        progress_bar.classList.remove("bg-primary", "bg-success", "bg-danger");
-        progress_bar.classList.add("bg-dark");
-    }
-    progress_bar.classList.add("progress-bar-striped");
-}
-
-socket.on("progress_status", (response) => {
-    libgenDataTable.innerHTML = '';
-    response.Data.forEach(function (item) {
-        var row = libgenDataTable.insertRow();
-        var cellItem = row.insertCell(0);
-        var cellLinkFound = row.insertCell(1);
-
-        cellItem.innerHTML = item.Item;
-        cellLinkFound.innerHTML = item.Status;
+        cell1.appendChild(checkbox);
+        cell2.appendChild(label);
     });
-    var percent_completion = response.Percent_Completion;
-    var actual_status = response.Status;
-    updateProgressBar(percent_completion, actual_status);
+    select_all_checkbox.checked = all_checked;
 });
 
-const themeSwitch = document.getElementById('themeSwitch');
-const savedTheme = localStorage.getItem('theme');
-const savedSwitchPosition = localStorage.getItem('switchPosition');
+socket.on("libgen_update", (response) => {
+    libgen_table.innerHTML = '';
+    response.data.forEach(function (entry) {
+        var row = libgen_table.insertRow();
+        var cell_item = row.insertCell(0);
+        var cell_item_status = row.insertCell(1);
 
-if (savedSwitchPosition) {
-    themeSwitch.checked = savedSwitchPosition === 'true';
+        cell_item.innerHTML = `${entry.author} - ${entry.book_name}`;
+        cell_item_status.innerHTML = entry.status;
+        cell_item_status.classList.add("text-center");
+    });
+    var percent_completion = response.percent_completion;
+    var actual_status = response.status;
+    update_progress_bar(percent_completion, actual_status);
+});
+
+socket.on("new_toast_msg", function (data) {
+    show_toast(data.title, data.message);
+});
+
+function show_toast(header, message) {
+    var toast_container = document.querySelector('.toast-container');
+    var toast_template = document.getElementById('toast-template').cloneNode(true);
+    toast_template.classList.remove('d-none');
+
+    toast_template.querySelector('.toast-header strong').textContent = header;
+    toast_template.querySelector('.toast-body').textContent = message;
+    toast_template.querySelector('.text-muted').textContent = new Date().toLocaleString();
+
+    toast_container.appendChild(toast_template);
+
+    var toast = new bootstrap.Toast(toast_template);
+    toast.show();
+
+    toast_template.addEventListener('hidden.bs.toast', function () {
+        toast_template.remove();
+    });
 }
 
-if (savedTheme) {
-    document.documentElement.setAttribute('data-bs-theme', savedTheme);
+const theme_switch = document.getElementById('theme-switch');
+const saved_theme = localStorage.getItem('theme');
+const saved_switch_position = localStorage.getItem('switchPosition');
+
+if (saved_switch_position) {
+    theme_switch.checked = saved_switch_position === 'true';
 }
 
-themeSwitch.addEventListener('click', () => {
+if (saved_theme) {
+    document.documentElement.setAttribute('data-bs-theme', saved_theme);
+}
+
+theme_switch.addEventListener('click', () => {
     if (document.documentElement.getAttribute('data-bs-theme') === 'dark') {
         document.documentElement.setAttribute('data-bs-theme', 'light');
     } else {
         document.documentElement.setAttribute('data-bs-theme', 'dark');
     }
     localStorage.setItem('theme', document.documentElement.getAttribute('data-bs-theme'));
-    localStorage.setItem('switchPosition', themeSwitch.checked);
+    localStorage.setItem('switchPosition', theme_switch.checked);
 });

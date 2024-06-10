@@ -1,149 +1,364 @@
 import logging
 import os
 import re
-import sys
+import time
+import json
 import threading
+import concurrent.futures
 import requests
 from flask import Flask, render_template
 from flask_socketio import SocketIO
 from bs4 import BeautifulSoup
-from libgen_api import LibgenSearch
-import unidecode
+from thefuzz import fuzz
+
+##from libgen_api import LibgenSearch
 
 
-class Data_Handler:
-    def __init__(self, readarrAddress, readarrAPIKey, libgenAddress, selectedPathType, selectedLanguage):
-        self.readarrAddress = readarrAddress
-        self.readarrApiKey = readarrAPIKey
-        self.libgenSearchType = "/fiction/?q="
-        self.libgenSearchBase = libgenAddress
-        self.selectedPathType = selectedPathType
-        self.selectedLanguage = selectedLanguage
-        self.directory_name = "downloads"
-        os.makedirs(self.directory_name, exist_ok=True)
-        self.readarrMaxTags = 250
-        self.readarrApiTimeout = 120
-        self.http_timeout = 120
-        self.libgenSleepInterval = 0
-        self.reset()
+class DataHandler:
+    def __init__(self):
+        logging.basicConfig(level=logging.WARNING, format="%(message)s")
+        self.general_logger = logging.getLogger()
 
-    def reset(self):
         self.readarr_items = []
-        self.download_list = []
-        self.stop_readarr_event = threading.Event()
-        self.stop_downloading_event = threading.Event()
-        self.stop_monitoring_event = threading.Event()
-        self.monitor_active_flag = False
-        self.running_flag = False
-        self.status = "Idle"
+        self.readarr_futures = []
+        self.readarr_status = "idle"
+        self.readarr_stop_event = threading.Event()
+
+        self.libgen_items = []
+        self.libgen_futures = []
+        self.libgen_status = "idle"
+        self.libgen_stop_event = threading.Event()
+
+        self.libgen_in_progress_flag = False
         self.index = 0
         self.percent_completion = 0
 
-    def get_missing_from_readarr(self):
+        self.clients_connected_counter = 0
+        self.config_folder = "config"
+        self.download_folder = "downloads"
+
+        if not os.path.exists(self.config_folder):
+            os.makedirs(self.config_folder)
+        if not os.path.exists(self.download_folder):
+            os.makedirs(self.download_folder)
+        self.load_environ_or_config_settings()
+
+    def load_environ_or_config_settings(self):
+        # Defaults
+        default_settings = {
+            "readarr_address": "http://192.168.1.2:8787",
+            "readarr_api_key": "",
+            "request_timeout": 120.0,
+            "libgen_address": "http://libgen.is",
+            "thread_limit": 1,
+            "sleep_interval": 0,
+            "search_type": "fiction",
+            "library_scan_on_completion": True,
+            "sync_schedule": [],
+            "minimum_match_ratio": 90,
+            "selected_language": "English",
+            "selected_path_type": "file",
+        }
+
+        # Load settings from environmental variables (which take precedence) over the configuration file.
+        self.readarr_address = os.environ.get("readarr_address", "")
+        self.readarr_api_key = os.environ.get("readarr_api_key", "")
+        self.libgen_address = os.environ.get("libgen_address", "")
+        sync_schedule = os.environ.get("sync_schedule", "")
+        self.sync_schedule = self.parse_sync_schedule(sync_schedule) if sync_schedule != "" else ""
+        sleep_interval = os.environ.get("sleep_interval", "")
+        self.sleep_interval = float(sleep_interval) if sleep_interval else ""
+        minimum_match_ratio = os.environ.get("minimum_match_ratio", "")
+        self.minimum_match_ratio = float(minimum_match_ratio) if minimum_match_ratio else ""
+        self.selected_path_type = os.environ.get("selected_path_type", "")
+        self.search_type = os.environ.get("search_type", "")
+        library_scan_on_completion = os.environ.get("library_scan_on_completion", "")
+        self.library_scan_on_completion = library_scan_on_completion.lower() == "true" if library_scan_on_completion != "" else ""
+        request_timeout = os.environ.get("request_timeout", "")
+        self.request_timeout = float(request_timeout) if request_timeout else ""
+        thread_limit = os.environ.get("thread_limit", "")
+        self.thread_limit = int(thread_limit) if thread_limit else ""
+        self.selected_language = os.environ.get("selected_language", "")
+
+        # Load variables from the configuration file if not set by environmental variables.
         try:
-            self.stop_readarr_event.clear()
-            self.readarr_items = []
-            endpoint = f"{self.readarrAddress}/api/v1/wanted/missing"
-            params = {"apikey": self.readarrApiKey, "pageSize": self.readarrMaxTags, "sortKey": "title", "sortDirection": "ascending"}
-            response = requests.get(endpoint, params=params, timeout=self.readarrApiTimeout)
-            if response.status_code == 200:
-                wanted_missing = response.json()
-                for wanted_book in wanted_missing["records"]:
-                    title = wanted_book["title"]
-                    author_and_title = wanted_book["authorTitle"]
-                    author_reversed = author_and_title.replace(title, "")
-                    author_with_sep = author_reversed.split(", ")
-                    author = "".join(reversed(author_with_sep)).title()
-                    self.readarr_items.append(author + " -- " + title)
-                self.readarr_items.sort()
-                ret = {"Status": "Success", "Data": self.readarr_items}
-            else:
-                ret = {"Status": "Error", "Code": response.status_code, "Data": response.text}
+            self.settings_config_file = os.path.join(self.config_folder, "settings_config.json")
+            if os.path.exists(self.settings_config_file):
+                self.general_logger.warning(f"Loading Settings via config file")
+                with open(self.settings_config_file, "r") as json_file:
+                    ret = json.load(json_file)
+                    for key in ret:
+                        if getattr(self, key) == "":
+                            setattr(self, key, ret[key])
+        except Exception as e:
+            self.general_logger.error(f"Error Loading Config: {str(e)}")
+
+        # Load defaults if not set by an environmental variable or configuration file.
+        for key, value in default_settings.items():
+            if getattr(self, key) == "":
+                setattr(self, key, value)
+
+        # Save config.
+        self.save_config_to_file()
+
+        # Start Scheduler
+        thread = threading.Thread(target=self.schedule_checker, name="Schedule_Thread")
+        thread.daemon = True
+        thread.start()
+
+    def save_config_to_file(self):
+        try:
+            with open(self.settings_config_file, "w") as json_file:
+                json.dump(
+                    {
+                        "readarr_address": self.readarr_address,
+                        "readarr_api_key": self.readarr_api_key,
+                        "libgen_address": self.libgen_address,
+                        "sleep_interval": self.sleep_interval,
+                        "sync_schedule": self.sync_schedule,
+                        "minimum_match_ratio": self.minimum_match_ratio,
+                        "selected_path_type": self.selected_path_type,
+                        "search_type": self.search_type,
+                        "library_scan_on_completion": self.library_scan_on_completion,
+                        "request_timeout": self.request_timeout,
+                        "thread_limit": self.thread_limit,
+                        "selected_language": self.selected_language,
+                    },
+                    json_file,
+                    indent=4,
+                )
 
         except Exception as e:
-            logger.error(str(e))
-            ret = {"Status": "Error", "Code": 500, "Data": str(e)}
+            self.general_logger.error(f"Error Saving Config: {str(e)}")
+
+    def connect(self):
+        socketio.emit("readarr_update", {"status": self.readarr_status, "data": self.readarr_items})
+        socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})
+        self.clients_connected_counter += 1
+
+    def disconnect(self):
+        self.clients_connected_counter = max(0, self.clients_connected_counter - 1)
+
+    def schedule_checker(self):
+        try:
+            while True:
+                current_hour = time.localtime().tm_hour
+                within_time_window = any(t == current_hour for t in self.sync_schedule)
+
+                if within_time_window:
+                    self.general_logger.warning(f"Time to Start - as in a time window: {self.sync_schedule}")
+                    self.get_wanted_list_from_readarr()
+                    if self.readarr_items:
+                        x = list(range(len(self.readarr_items)))
+                        self.add_items_to_download(x)
+                    else:
+                        self.general_logger.warning("No Missing Items")
+
+                    self.general_logger.warning("Big sleep for 1 Hour")
+                    time.sleep(3600)
+                    self.general_logger.warning(f"Checking every 10 minutes as not in a sync time window: {self.sync_schedule}")
+                else:
+                    time.sleep(600)
+
+        except Exception as e:
+            self.general_logger.error(f"Error in Scheduler: {str(e)}")
+            self.general_logger.error(f"Scheduler Stopped")
+
+    def get_wanted_list_from_readarr(self):
+        try:
+            self.general_logger.warning(f"Accessing Readarr API")
+            self.readarr_status = "busy"
+            self.readarr_stop_event.clear()
+            self.readarr_items = []
+            page = 1
+            while True:
+                if self.readarr_stop_event.is_set():
+                    return
+                endpoint = f"{self.readarr_address}/api/v1/wanted/missing"
+                params = {"apikey": self.readarr_api_key, "page": page}
+                response = requests.get(endpoint, params=params, timeout=self.request_timeout)
+                if response.status_code == 200:
+                    wanted_missing_items = response.json()
+                    if not wanted_missing_items["records"]:
+                        break
+                    for item in wanted_missing_items["records"]:
+                        if self.readarr_stop_event.is_set():
+                            break
+
+                        title = item["title"]
+                        author_and_title = item["authorTitle"]
+                        author_reversed = author_and_title.replace(title, "")
+                        author_with_sep = author_reversed.split(", ")
+                        author = "".join(reversed(author_with_sep)).title()
+
+                        new_item = {
+                            "author": author,
+                            "book_name": title,
+                            "checked": True,
+                            "status": "",
+                        }
+                        self.readarr_items.append(new_item)
+                    page += 1
+                else:
+                    self.general_logger.error(f"Readarr Wanted API Error Code: {response.status_code}")
+                    self.general_logger.error(f"Readarr Wanted API Error Text: {response.text}")
+                    socketio.emit("new_toast_msg", {"title": f"Readarr API Error: {response.status_code}", "message": response.text})
+                    break
+
+            self.readarr_items.sort(key=lambda x: (x["author"], x["book_name"]))
+            self.readarr_status = "stopped" if self.readarr_stop_event.is_set() else "complete"
+
+        except Exception as e:
+            self.general_logger.error(f"Error Getting Missing Books: {str(e)}")
+            self.readarr_status = "error"
+            socketio.emit("new_toast_msg", {"title": "Error Getting Missing Books", "message": str(e)})
 
         finally:
-            if not self.stop_readarr_event.is_set():
-                socketio.emit("readarr_status", ret)
-            else:
-                ret = {"Status": "Error", "Code": "", "Data": ""}
-                socketio.emit("readarr_status", ret)
+            socketio.emit("readarr_update", {"status": self.readarr_status, "data": self.readarr_items})
 
-    def add_items(self):
+    def trigger_readarr_scan(self):
         try:
-            while not self.stop_downloading_event.is_set() and self.index < len(self.download_list):
-                self.status = "Running"
-                req_book = self.download_list[self.index]
-                search_results = self.search_libgen(req_book)
-                if search_results:
-                    req_book["Status"] = "Link Found"
-
-                    for link in search_results:
-                        ret = self.download_from_libgen(req_book, link)
-                        if ret == "Success":
-                            req_book["Status"] = "Download Complete"
-                            break
-                        elif ret == "Already Exists":
-                            req_book["Status"] = "File Already Exists"
-                            break
-                    else:
-                        req_book["Status"] = ret
-                        self.index += 1
-                        continue
-                else:
-                    self.index += 1
-                    continue
-
-                logger.warning("Sleeping between requests")
-                if self.stop_downloading_event.wait(timeout=self.libgenSleepInterval):
-                    break
-                logger.warning("Finished sleeping")
-                self.index += 1
-
-            if not self.stop_downloading_event.is_set():
-                self.status = "Complete"
-                logger.warning("Finished")
-                self.running_flag = False
+            endpoint = "/api/v1/rootfolder"
+            headers = {"X-Api-Key": self.readarr_api_key}
+            root_folder_list = []
+            response = requests.get(f"{self.readarr_address}{endpoint}", headers=headers)
+            endpoint = "/api/v1/command"
+            if response.status_code == 200:
+                root_folders = response.json()
+                for folder in root_folders:
+                    root_folder_list.append(folder["path"])
             else:
-                self.status = "Stopped"
-                logger.warning("Stopped")
-                self.running_flag = False
-                ret = {"Status": "Error", "Data": "Stopped"}
-                socketio.emit("libgen_status", ret)
+                self.general_logger.warning(f"No Readarr root folders found")
+
+            if root_folder_list:
+                data = {"name": "RescanFolders", "folders": root_folder_list}
+                headers = {"X-Api-Key": self.readarr_api_key, "Content-Type": "application/json"}
+                response = requests.post(f"{self.readarr_address}{endpoint}", json=data, headers=headers)
+                if response.status_code != 201:
+                    self.general_logger.warning(f"Failed to start readarr library scan")
 
         except Exception as e:
-            logger.error(str(e))
-            self.status = "Stopped"
-            logger.warning("Stopped")
-            ret = {"Status": "Error", "Data": str(e)}
-            socketio.emit("libgen_status", ret)
+            self.general_logger.error(f"Readarr library scan failed: {str(e)}")
 
-    def search_libgen(self, book):
+        else:
+            self.general_logger.warning(f"Readarr library scan started")
+
+    def add_items_to_download(self, data):
         try:
-            item = book["Item"]
-            author_name, book_title = item.split(" -- ", 1)
-            found_links = []
-            normalised_string = unidecode.unidecode(item)
-            temp_string = normalised_string.replace("--", "")
-            cleaned_string = re.sub(r"\s+", " ", temp_string).strip()
+            self.libgen_stop_event.clear()
+            if self.libgen_status == "complete" or self.libgen_status == "stopped":
+                self.libgen_items = []
+                self.percent_completion = 0
+            for i in range(len(self.readarr_items)):
+                if i in data:
+                    self.readarr_items[i]["status"] = "Queued"
+                    self.readarr_items[i]["checked"] = True
+                    self.libgen_items.append(self.readarr_items[i])
+                else:
+                    self.readarr_items[i]["checked"] = False
 
-            if "non-fiction" in self.libgenSearchType:
+            if self.libgen_in_progress_flag == False:
+                self.index = 0
+                self.libgen_in_progress_flag = True
+                thread = threading.Thread(target=self.master_queue, name="Queue_Thread")
+                thread.daemon = True
+                thread.start()
+
+        except Exception as e:
+            self.general_logger.error(f"Error Adding Items to Download: {str(e)}")
+            socketio.emit("new_toast_msg", {"title": "Error adding new items", "message": str(e)})
+
+        finally:
+            socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})
+            socketio.emit("new_toast_msg", {"title": "Download Queue Updated", "message": "New Items added to Queue"})
+
+    def master_queue(self):
+        try:
+            while not self.libgen_stop_event.is_set() and self.index < len(self.libgen_items):
+                self.libgen_status = "running"
+                with concurrent.futures.ThreadPoolExecutor(max_workers=self.thread_limit) as executor:
+                    self.libgen_futures = []
+                    start_position = self.index
+                    for req_item in self.libgen_items[start_position:]:
+                        if self.libgen_stop_event.is_set():
+                            break
+                        self.libgen_futures.append(executor.submit(self.find_link_and_download, req_item))
+                    concurrent.futures.wait(self.libgen_futures)
+
+            if self.libgen_stop_event.is_set():
+                self.libgen_status = "stopped"
+                self.general_logger.warning("Downloading Stopped")
+                self.libgen_in_progress_flag = False
+            else:
+                self.libgen_status = "complete"
+                self.general_logger.warning("Downloading Finished")
+                self.libgen_in_progress_flag = False
+                if self.library_scan_on_completion:
+                    self.trigger_readarr_scan()
+
+        except Exception as e:
+            self.general_logger.error(f"Error in Master Queue: {str(e)}")
+            self.libgen_status = "failed"
+            socketio.emit("new_toast_msg", {"title": "Error in Master Queue", "message": str(e)})
+
+        finally:
+            socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})
+            socketio.emit("new_toast_msg", {"title": "End of Session", "message": f"Downloading {self.libgen_status.capitalize()}"})
+
+    def find_link_and_download(self, req_item):
+        try:
+            req_item["status"] = "Searching..."
+            socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})
+            search_results = self._link_finder(req_item)
+            if self.libgen_stop_event.is_set():
+                return
+
+            if search_results:
+                req_item["status"] = "Link Found"
+                socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})
+                for link in search_results:
+                    ret = self.download_from_libgen(req_item, link)
+                    if ret == "Success":
+                        req_item["status"] = "Download Complete"
+                        break
+                    elif ret == "Already Exists":
+                        req_item["status"] = "File Already Exists"
+                        break
+                else:
+                    req_item["status"] = ret
+
+        except Exception as e:
+            self.general_logger.error(f"Error Downloading: {str(e)}")
+            req_item["status"] = "Download Error"
+
+        finally:
+            self.index += 1
+            self.percent_completion = 100 * (self.index / len(self.libgen_items)) if self.libgen_items else 0
+            socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})
+
+    def _link_finder(self, req_item):
+        try:
+            self.general_logger.warning(f'Searching for Book: {req_item["author"]} - {req_item["book_name"]}')
+            author = req_item["author"]
+            book_name = req_item["book_name"]
+            query_text = f"{author} - {book_name}"
+            found_links = []
+
+            if self.search_type.lower() == "non-fiction":
                 s = LibgenSearch()
-                title_filters = {"Author": author_name, "Language": "English"}
-                results = s.search_title_filtered(book_title, title_filters, exact_match=False)
+                title_filters = {"Author": author, "Language": self.selected_language}
+                results = s.search_title_filtered(book_name, title_filters, exact_match=False)
                 if results:
                     item_to_download = results[0]
                     download_links = s.resolve_download_links(item_to_download)
                     found_links = [value for value in download_links.values()]
                 else:
-                    book["Status"] = "No Link Found"
+                    req_item["status"] = "No Link Found"
 
             else:
-                search_item = cleaned_string.replace(" ", "+")
-                url = self.libgenSearchBase + self.libgenSearchType + search_item
-                response = requests.get(url, timeout=self.http_timeout)
+                search_item = query_text.replace(" ", "+")
+                url = f"{self.libgen_address}/fiction/?q={search_item}"
+                response = requests.get(url, timeout=self.request_timeout)
                 if response.status_code == 200:
                     soup = BeautifulSoup(response.text, "html.parser")
                     table = soup.find("tbody")
@@ -154,51 +369,85 @@ class Data_Handler:
 
                     for row in rows:
                         try:
+                            cells = row.find_all("td")
                             try:
-                                language = row.find_all("td")[3].get_text().strip()
+                                author_string = cells[0].get_text().strip()
+                            except:
+                                author_string = ""
+                            try:
+                                raw_title = cells[2].get_text().strip()
+                                if "\nISBN" in raw_title:
+                                    title_string = raw_title.split("\nISBN")[0]
+                                else:
+                                    title_string = raw_title
+                            except:
+                                title_string = ""
+                            try:
+                                language = cells[3].get_text().strip()
                             except:
                                 language = "english"
                             try:
-                                file_type = row.find_all("td")[4].get_text().strip()
+                                file_type = cells[4].get_text().strip()
                             except:
                                 file_type = "EPUB"
                             file_type_check = any(ft in file_type for ft in ["EPUB", "MOBI", "AZW3", "DJVU"])
-                            language_check = language.lower() == self.selectedLanguage or self.selectedLanguage == "all"
+                            language_check = language.lower() == self.selected_language.lower() or self.selected_language.lower() == "all"
+
                             if file_type_check and language_check:
-                                mirrors = row.find("ul", class_="record_mirrors_compact")
-                                links = mirrors.find_all("a", href=True)
-                                for link in links:
-                                    href = link["href"]
-                                    if href.startswith("http://") or href.startswith("https://"):
-                                        found_links.append(href)
+                                author_name_match_ratio = self.compare_author_names(author, author_string)
+                                book_name_match_ratio = fuzz.ratio(title_string, book_name)
+                                if author_name_match_ratio > self.minimum_match_ratio and book_name_match_ratio > self.minimum_match_ratio:
+                                    mirrors = row.find("ul", class_="record_mirrors_compact")
+                                    links = mirrors.find_all("a", href=True)
+                                    for link in links:
+                                        href = link["href"]
+                                        if href.startswith("http://") or href.startswith("https://"):
+                                            found_links.append(href)
                         except:
                             pass
 
                     if not found_links:
-                        book["Status"] = "No Link Found"
-                    else:
-                        ret = {"Status": "Success", "Data": "Found Links"}
-                        socketio.emit("libgen_status", ret)
+                        req_item["status"] = "No Link Found"
+                    socketio.emit("libgen_update", {"status": "Success", "data": self.libgen_items, "percent_completion": self.percent_completion})
                 else:
-                    ret = {"Status": "Error", "Data": "Libgen Connection Error"}
-                    logger.error("Libgen Connection Error: " + str(response.status_code) + " Data: " + response.text)
-                    socketio.emit("libgen_status", ret)
-                    book["Status"] = "Libgen DB Error"
+                    socketio.emit("libgen_update", {"status": "Error", "data": self.libgen_items, "percent_completion": self.percent_completion})
+                    self.general_logger.error("Libgen Connection Error: " + str(response.status_code) + " Data: " + response.text)
+                    req_item["status"] = "Libgen Error"
+                    socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})
 
         except Exception as e:
-            logger.error(str(e))
-            raise Exception("Error Searching libgen: " + str(e))
+            self.general_logger.error(f"Error Searching libgen: {str(e)}")
+            raise Exception(f"Error Searching libgen: {str(e)}")
 
         finally:
             return found_links
 
-    def download_from_libgen(self, req_book, link):
-        if "non-fiction" in self.libgenSearchType:
+    def compare_author_names(self, author, author_string):
+        try:
+            processed_author = self.preprocess(author)
+            processed_author_string = self.preprocess(author_string)
+            match_ratio = fuzz.ratio(processed_author, processed_author_string)
+
+        except Exception as e:
+            self.general_logger.error(f"Error Comparing Names: {str(e)}")
+            match_ratio = 0
+
+        finally:
+            return match_ratio
+
+    def preprocess(self, name):
+        name = "".join(e for e in name if e.isalnum() or e.isspace()).lower()
+        words = name.split()
+        words.sort()
+        return " ".join(words)
+
+    def download_from_libgen(self, req_item, link):
+        if self.search_type.lower() == "non-fiction":
             valid_book_extensions = [".pdf", ".epub", ".mobi", ".azw3", ".djvu"]
             link_url = link
         else:
             valid_book_extensions = [".epub", ".mobi", ".azw3", ".djvu"]
-            response = requests.get(link, timeout=self.http_timeout)
+            response = requests.get(link, timeout=self.request_timeout)
             if response.status_code == 200:
                 soup = BeautifulSoup(response.text, "html.parser")
                 download_div = soup.find("div", id="download")
@@ -231,7 +480,9 @@ class Data_Handler:
             else:
                 return str(response.status_code) + " : " + response.text
 
-        req_book["Status"] = "Checking Link"
+        req_item["status"] = "Checking Link"
+        socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})
+
         try:
             file_type = None
             try:
@@ -239,7 +490,7 @@ class Data_Handler:
                 if file_type_from_link in valid_book_extensions:
                     file_type = file_type_from_link
             except:
-                logger.info("File extension not in url or invalid, checking link content...")
+                self.general_logger.info("File extension not in url or invalid, checking link content...")
 
             finally:
                 dl_resp = requests.get(link_url, stream=True)
@@ -255,73 +506,132 @@ class Data_Handler:
         except:
             return "Unknown File Type"
 
-        final_file_name = re.sub(r'[\\/*?:"<>|]', " ", req_book["Item"])
-        author_name, book_title = final_file_name.split(" -- ", 1)
-        author_name = author_name.title()
-        final_file_name = final_file_name.replace(" -- ", " - ")
-        if self.selectedPathType == "file":
-            file_path = os.path.join(self.directory_name, author_name + " - " + book_title + file_type)
+        final_file_name = re.sub(r'[\\/*?:"<>|]', " ", f"{req_item['author']} - {req_item['book_name']}")
 
-        elif self.selectedPathType == "folder":
-            file_path = os.path.join(self.directory_name, author_name, book_title, author_name + " - " + book_title + file_type)
+        if self.selected_path_type == "file":
+            file_path = os.path.join(self.download_folder, final_file_name + file_type)
+
+        elif self.selected_path_type == "folder":
+            file_path = os.path.join(self.download_folder, req_item["author"], req_item["book_name"], req_item["author"] + " - " + req_item["author"] + file_type)
 
         if os.path.exists(file_path):
-            logger.info("File already exists: " + file_path)
-            req_book["Status"] = "File Already Exists"
+            self.general_logger.info("File already exists: " + file_path)
+            req_item["status"] = "File Already Exists"
             return "Already Exists"
         else:
-            if self.selectedPathType == "folder":
+            if self.selected_path_type == "folder":
                 os.makedirs(os.path.dirname(file_path), exist_ok=True)
 
-        if self.stop_downloading_event.is_set():
+        if self.libgen_stop_event.is_set():
             raise Exception("Cancelled")
 
         if dl_resp.status_code == 200:
             # Download file
-            req_book["Status"] = "Downloading"
+            req_item["status"] = "Downloading"
+            socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})
+            self.general_logger.info(f"Downloading: {final_file_name}")
+
             with open(file_path, "wb") as f:
                 for chunk in dl_resp.iter_content(chunk_size=1024):
-                    if self.stop_downloading_event.is_set():
+                    if self.libgen_stop_event.is_set():
                         raise Exception("Cancelled")
                     f.write(chunk)
             if os.path.exists(file_path):
-                logger.info("Downloaded: " + link_url + " to " + final_file_name)
+                self.general_logger.info(f"Downloaded: {link_url} to {final_file_name}")
                 return "Success"
             else:
-                logger.info("Downloaded file not found in Directory")
+                self.general_logger.info("Downloaded file not found in Directory")
                 return "Failed"
         else:
-            req_book["Status"] = "Download Error"
+            req_item["status"] = "Download Error"
+            socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})
             return str(dl_resp.status_code) + " : " + dl_resp.text
 
-    def monitor(self):
-        while not self.stop_monitoring_event.is_set():
-            self.percent_completion = 100 * (self.index / len(self.download_list)) if self.download_list else 0
-            custom_data = {"Data": self.download_list, "Status": self.status, "Percent_Completion": self.percent_completion}
-            socketio.emit("progress_status", custom_data)
-            self.stop_monitoring_event.wait(1)
+    def reset_readarr(self):
+        self.readarr_stop_event.set()
+        for future in self.readarr_futures:
+            if not future.done():
+                future.cancel()
+        self.readarr_items = []
 
-    def cancel_downloads(self):
-        self.stop_readarr_event.set()
-        self.stop_downloading_event.set()
-        for item in self.download_list[self.index :]:
-            item["Status"] = "Download Cancelled"
+    def stop_libgen(self):
+        try:
+            self.libgen_stop_event.set()
+            for future in self.libgen_futures:
+                if not future.done():
+                    future.cancel()
+            for x in self.libgen_items[self.index :]:
+                x["status"] = "Download Stopped"
+
+        except Exception as e:
+            self.general_logger.error(f"Error Stopping libgen: {str(e)}")
+
+        finally:
+            self.libgen_status = "stopped"
+            socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})
+
+    def reset_libgen(self):
+        try:
+            self.libgen_stop_event.set()
+            for future in self.libgen_futures:
+                if not future.done():
+                    future.cancel()
+            self.libgen_items = []
+            self.percent_completion = 0
+
+        except Exception as e:
+            self.general_logger.error(f"Error Resetting libgen: {str(e)}")
+
+        else:
+            self.general_logger.warning("Reset Complete")
+
+        finally:
+            socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})
+
+    def update_settings(self, data):
+        try:
+            self.readarr_address = data["readarr_address"]
+            self.readarr_api_key = data["readarr_api_key"]
+            self.libgen_address = data["libgen_address"]
+            self.sleep_interval = float(data["sleep_interval"])
+            self.sync_schedule = self.parse_sync_schedule(data["sync_schedule"])
+            self.minimum_match_ratio = float(data["minimum_match_ratio"])
+
+        except Exception as e:
+            self.general_logger.error(f"Failed to update settings: {str(e)}")
+
+    def parse_sync_schedule(self, input_string):
+        try:
+            ret = []
+            if input_string != "":
+                raw_sync_schedule = [int(re.sub(r"\D", "", start_time.strip())) for start_time in input_string.split(",")]
+                temp_sync_schedule = [0 if x < 0 or x > 23 else x for x in raw_sync_schedule]
+                cleaned_sync_schedule = sorted(list(set(temp_sync_schedule)))
+                ret = cleaned_sync_schedule
+
+        except Exception as e:
+            self.general_logger.error(f"Time not in correct format: {str(e)}")
+            self.general_logger.error(f"Schedule Set to {ret}")
+
+        finally:
+            return ret
+
+    def load_settings(self):
+        data = {
+            "readarr_address": self.readarr_address,
+            "readarr_api_key": self.readarr_api_key,
+            "libgen_address": self.libgen_address,
+            "sleep_interval": self.sleep_interval,
+            "sync_schedule": self.sync_schedule,
+            "minimum_match_ratio": self.minimum_match_ratio,
+        }
+        socketio.emit("settings_loaded", data)
 
 
 app = Flask(__name__)
 app.secret_key = "secret_key"
 socketio = SocketIO(app)
-
-logging.basicConfig(level=logging.DEBUG, format="%(asctime)s %(message)s", datefmt="%d/%m/%Y %H:%M:%S", handlers=[logging.StreamHandler(sys.stdout)])
-logger = logging.getLogger()
-
-readarrAddress = os.environ.get("readarr_address", "http://192.168.1.2:8787")
-readarrAPIKey = os.environ.get("readarr_api_key", "XYZ0123456789")
-libgenAddress = os.environ.get("libgen_address", "http://libgen.is")
-selectedPathType = os.environ.get("selected_path_type", "folder").lower()
-selectedLanguage = os.environ.get("selected_language", "all").lower()
-
-data_handler = Data_Handler(readarrAddress, readarrAPIKey, libgenAddress, selectedPathType, selectedLanguage)
+data_handler = DataHandler()
 
 
 @app.route("/")
@@ -329,92 +639,57 @@ def home():
     return render_template("base.html")
 
 
-@socketio.on("readarr")
+@socketio.on("readarr_get_wanted")
 def readarr():
-    thread = threading.Thread(target=data_handler.get_missing_from_readarr)
+    thread = threading.Thread(target=data_handler.get_wanted_list_from_readarr, name="Readarr_Thread")
+    thread.daemon = True
     thread.start()
 
 
-@socketio.on("libgen")
-def libgen(data):
-    try:
-        data_handler.stop_downloading_event.clear()
-        if data_handler.status == "Complete":
-            data_handler.download_list = []
-        for item in data["Data"]:
-            full_item = {"Item": item, "Status": "Queued"}
-            data_handler.download_list.append(full_item)
+@socketio.on("stop_readarr")
+def stop_readarr():
+    data_handler.readarr_stop_event.set()
 
-        if data_handler.running_flag == False:
-            data_handler.index = 0
-            data_handler.running_flag = True
-            thread = threading.Thread(target=data_handler.add_items)
-            thread.daemon = True
-            thread.start()
 
-        ret = {"Status": "Success"}
+@socketio.on("reset_readarr")
+def reset_readarr():
+    data_handler.reset_readarr()
 
-    except Exception as e:
-        logger.error(str(e))
-        ret = {"Status": "Error", "Data": str(e)}
 
-    finally:
-        socketio.emit("libgen_status", ret)
+@socketio.on("stop_libgen")
+def stop_libgen():
+    data_handler.stop_libgen()
+
+
+@socketio.on("reset_libgen")
+def reset_libgen():
+    data_handler.reset_libgen()
+
+
+@socketio.on("add_to_download_list")
+def add_to_download_list(data):
+    data_handler.add_items_to_download(data)
 
 
 @socketio.on("connect")
 def connection():
-    if data_handler.monitor_active_flag == False:
-        data_handler.stop_monitoring_event.clear()
-        thread = threading.Thread(target=data_handler.monitor)
-        thread.daemon = True
-        thread.start()
-        data_handler.monitor_active_flag = True
-
-
-@socketio.on("loadSettings")
-def loadSettings():
-    data = {
-        "readarrApiKey": data_handler.readarrApiKey,
-        "readarrMaxTags": data_handler.readarrMaxTags,
-        "readarrApiTimeout": data_handler.readarrApiTimeout,
-        "libgenSearchBase": data_handler.libgenSearchBase,
-        "libgenSearchType": data_handler.libgenSearchType,
-        "libgenSleepInterval": data_handler.libgenSleepInterval,
-    }
-    socketio.emit("settingsLoaded", data)
-
-
-@socketio.on("updateSettings")
-def updateSettings(data):
-    data_handler.readarrApiKey = data["readarrApiKey"]
-    data_handler.readarrMaxTags = int(data["readarrMaxTags"])
-    data_handler.readarrApiTimeout = int(data["readarrApiTimeout"])
-    data_handler.libgenSearchBase = data["libgenSearchBase"]
-    data_handler.libgenSearchType = data["libgenSearchType"]
-    data_handler.libgenSleepInterval = int(data["libgenSleepInterval"])
+    data_handler.connect()
 
 
 @socketio.on("disconnect")
 def disconnect():
-    data_handler.stop_monitoring_event.set()
-    data_handler.monitor_active_flag = False
+    data_handler.disconnect()
 
 
-@socketio.on("stopper")
-def stopper():
-    if data_handler.download_list:
-        ret = {"Status": "Error", "Data": "Stopping"}
-        socketio.emit("libgen_status", ret)
-    data_handler.cancel_downloads()
+@socketio.on("load_settings")
+def load_settings():
+    data_handler.load_settings()
 
 
-@socketio.on("reset")
-def reset():
-    data_handler.cancel_downloads()
-    data_handler.reset()
-    custom_data = {"Data": data_handler.download_list, "Status": data_handler.status, "Percent_Completion": data_handler.percent_completion}
-    socketio.emit("progress_status", custom_data)
+@socketio.on("update_settings")
+def update_settings(data):
+    data_handler.update_settings(data)
+    data_handler.save_config_to_file()
 
 
 if __name__ == "__main__":

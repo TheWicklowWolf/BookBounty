@@ -3,7 +3,7 @@
 ![Build Status](https://github.com/TheWicklowWolf/BookBounty/actions/workflows/main.yml/badge.svg)
 ![Docker Pulls](https://img.shields.io/docker/pulls/thewicklowwolf/bookbounty.svg)
 
-![bookbounty](https://github.com/TheWicklowWolf/BookBounty/assets/111055425/394d8830-fa7b-462e-9de8-aa91d0e1b971)
+<img src="/src/static/bookbounty.png" alt="image">
 
 
 Web GUI for finding missing Readarr books.
@@ -16,10 +16,6 @@ services:
   bookbounty:
     image: thewicklowwolf/bookbounty:latest
     container_name: bookbounty
-    environment:
-      - readarr_address=http://192.168.1.2:8787
-      - readarr_api_key=0123456789
-      - libgen_address=http://libgen.is
     ports:
       - 5000:5000
     volumes:
@@ -29,15 +25,36 @@ services:
 ```
 ---
 
-![BookBounty](https://github.com/TheWicklowWolf/BookBounty/assets/111055425/c965dedb-dc04-4dce-9932-4f13a0821cec)
+## Configuration via environment variables
+
+Certain values can be set via environment variables:
+
+* __readarr_address__: The URL for Readarr. Defaults to `http://192.168.1.2:8787`.
+* __readarr_api_key__: The API key for Readarr. Defaults to ` `.
+* __libgen_address__: The URL for Library Genesis. Defaults to `http://libgen.is`.
+* __sleep_interval__: Interval to sleep between downloads (seconds). Defaults to `0`.
+* __sync_schedule__: Schedule times to run (comma seperated values in 24hr). Defaults to ` `.
+* __minimum_match_ratio__: Minimum percentage for a match. Defaults to `90`.
+* __selected_path_type__: Select Download Structure (file or folder). Defaults to `file`.
+* __search_type__: Select Search Type (fiction or non-fiction). Defaults to `fiction`.
+* __library_scan_on_completion__: Whether to scan Readarr Library on completion. Defaults to `True`.
+* __request_timeout__: Timeout for requests (seconds). Defaults to `120`.
+* __thread_limit__: Max number of threads to use. Defaults to `1`.
+* __selected_language__: Filter download by language (specific languange or all). Defaults to `English`.
+
+---
+
+
+<img src="/src/static/dark.png" alt="image">
 
 
 ---
 
 
-![BookBounty_Dark](https://github.com/TheWicklowWolf/BookBounty/assets/111055425/dfb5ec88-57c7-4651-b0c5-7f61c4556c4e)
+<img src="/src/static/light.png" alt="image">
 
 
 ---
 
 https://hub.docker.com/r/thewicklowwolf/bookbounty
+
