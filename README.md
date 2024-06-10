@@ -19,6 +19,7 @@ services:
     ports:
       - 5000:5000
     volumes:
+      - /path/to/config:/bookbounty/config
       - /path/to/downloads:/bookbounty/downloads
     restart: unless-stopped
 
