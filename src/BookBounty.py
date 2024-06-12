@@ -608,7 +608,7 @@ class DataHandler:
         try:
             self.readarr_address = data["readarr_address"]
             self.readarr_api_key = data["readarr_api_key"]
-            self.libgen_address = data["libgen_address"]
+            self.search_type = data["search_type"]
             self.sleep_interval = float(data["sleep_interval"])
             self.sync_schedule = self.parse_sync_schedule(data["sync_schedule"])
             self.minimum_match_ratio = float(data["minimum_match_ratio"])
@@ -636,7 +636,7 @@ class DataHandler:
         data = {
             "readarr_address": self.readarr_address,
             "readarr_api_key": self.readarr_api_key,
-            "libgen_address": self.libgen_address,
+            "search_type": self.search_type,
             "sleep_interval": self.sleep_interval,
             "sync_schedule": self.sync_schedule,
             "minimum_match_ratio": self.minimum_match_ratio,
