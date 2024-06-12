@@ -43,6 +43,8 @@ Certain values can be set via environment variables:
 * __request_timeout__: Timeout for requests (seconds). Defaults to `120`.
 * __thread_limit__: Max number of threads to use. Defaults to `1`.
 * __selected_language__: Filter download by language (specific languange or all). Defaults to `English`.
+* __preferred_extensions_fiction__: Filter fiction download by extension (comma separated). Defaults to `.epub, .mobi, .azw3, .djvu`.
+* __preferred_extensions_non_fiction__: Filter non-fiction download by extension (comma separated). Defaults to `.pdf .epub, .mobi, .azw3, .djvu`.
 
 ---
 
