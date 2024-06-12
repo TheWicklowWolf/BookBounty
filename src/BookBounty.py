@@ -513,8 +513,10 @@ class DataHandler:
                 self.general_logger.info("File extension not in url or invalid, checking link content...")
 
         dl_resp = requests.get(link_url, stream=True)
-        if file_type == None:
+        if file_type == None or ".php" in file_type:
             link_file_name_text = dl_resp.headers.get("content-disposition")
+            if not link_file_name_text:
+                return "Unknown File Type"
             for ext in valid_book_extensions:
                 if ext in link_file_name_text.lower():
                     file_type = ext
