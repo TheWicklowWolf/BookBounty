@@ -27,6 +27,7 @@ class DataHandler:
         self.libgen_futures = []
         self.libgen_status = "idle"
         self.libgen_stop_event = threading.Event()
+        self.libgen_thread_lock = threading.Lock()
 
         self.libgen_in_progress_flag = False
         self.index = 0
@@ -57,6 +58,8 @@ class DataHandler:
             "minimum_match_ratio": 90,
             "selected_language": "English",
             "selected_path_type": "file",
+            "preferred_extensions_fiction": [".epub", ".mobi", ".azw3", ".djvu"],
+            "preferred_extensions_non_fiction": [".pdf", ".epub", ".mobi", ".azw3", ".djvu"],
         }
 
         # Load settings from environmental variables (which take precedence) over the configuration file.
@@ -78,6 +81,10 @@ class DataHandler:
         thread_limit = os.environ.get("thread_limit", "")
         self.thread_limit = int(thread_limit) if thread_limit else ""
         self.selected_language = os.environ.get("selected_language", "")
+        preferred_extensions_fiction = os.environ.get("preferred_extensions_fiction", "")
+        self.preferred_extensions_fiction = preferred_extensions_fiction.split(",") if preferred_extensions_fiction else ""
+        preferred_extensions_non_fiction = os.environ.get("preferred_extensions_non_fiction", "")
+        self.preferred_extensions_non_fiction = preferred_extensions_non_fiction.split(",") if preferred_extensions_non_fiction else ""
 
         # Load variables from the configuration file if not set by environmental variables.
         try:
@@ -122,6 +129,8 @@ class DataHandler:
                         "request_timeout": self.request_timeout,
                         "thread_limit": self.thread_limit,
                         "selected_language": self.selected_language,
+                        "preferred_extensions_fiction": self.preferred_extensions_fiction,
+                        "preferred_extensions_non_fiction": self.preferred_extensions_non_fiction,
                     },
                     json_file,
                     indent=4,
@@ -344,9 +353,16 @@ class DataHandler:
             found_links = []
 
             if self.search_type.lower() == "non-fiction":
-                s = LibgenSearch()
-                title_filters = {"Author": author, "Language": self.selected_language}
-                results = s.search_title_filtered(book_name, title_filters, exact_match=False)
+                try:
+                    with self.libgen_thread_lock:
+                        s = LibgenSearch()
+                        title_filters = {"Author": author, "Language": self.selected_language}
+                        results = s.search_title_filtered(book_name, title_filters, exact_match=False)
+
+                except Exception as e:
+                    self.general_logger.error(f"Error accessing libgen API: {str(e)}")
+                    results = None
+
                 if results:
                     item_to_download = results[0]
                     download_links = s.resolve_download_links(item_to_download)
@@ -388,10 +404,10 @@ class DataHandler:
                             except:
                                 language = "english"
                             try:
-                                file_type = cells[4].get_text().strip()
+                                file_type = cells[4].get_text().strip().lower()
                             except:
-                                file_type = "EPUB"
-                            file_type_check = any(ft in file_type for ft in ["EPUB", "MOBI", "AZW3", "DJVU"])
+                                file_type = ".epub"
+                            file_type_check = any(ft.replace(".", "").lower() in file_type for ft in self.preferred_extensions_fiction)
                             language_check = language.lower() == self.selected_language.lower() or self.selected_language.lower() == "all"
 
                             if file_type_check and language_check:
@@ -445,10 +461,14 @@ class DataHandler:
 
     def download_from_libgen(self, req_item, link):
         if self.search_type.lower() == "non-fiction":
-            valid_book_extensions = [".pdf", ".epub", ".mobi", ".azw3", ".djvu"]
+            valid_book_extensions = self.preferred_extensions_non_fiction
             link_url = link
+            try:
+                file_type = os.path.splitext(link_url)[1]
+            except:
+                file_type = None
         else:
-            valid_book_extensions = [".epub", ".mobi", ".azw3", ".djvu"]
+            valid_book_extensions = self.preferred_extensions_fiction
             response = requests.get(link, timeout=self.request_timeout)
             if response.status_code == 200:
                 soup = BeautifulSoup(response.text, "html.parser")
@@ -482,31 +502,25 @@ class DataHandler:
             else:
                 return str(response.status_code) + " : " + response.text
 
-        req_item["status"] = "Checking Link"
-        socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})
+            req_item["status"] = "Checking Link"
+            socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})
 
-        try:
-            file_type = None
             try:
-                file_type_from_link = os.path.splitext(link_url)[1]
-                if file_type_from_link in valid_book_extensions:
-                    file_type = file_type_from_link
+                file_type = os.path.splitext(link_url)[1]
+
             except:
+                file_type = None
                 self.general_logger.info("File extension not in url or invalid, checking link content...")
 
-            finally:
-                dl_resp = requests.get(link_url, stream=True)
-                if file_type == None:
-                    link_file_name_text = dl_resp.headers.get("content-disposition")
-                    for ext in [".epub", ".mobi", ".azw3", ".djvu"]:
-                        if ext in link_file_name_text.lower():
-                            file_type = ext
-                            break
-                    else:
-                        return "Wrong File Type"
-
-        except:
-            return "Unknown File Type"
+        dl_resp = requests.get(link_url, stream=True)
+        if file_type == None:
+            link_file_name_text = dl_resp.headers.get("content-disposition")
+            for ext in valid_book_extensions:
+                if ext in link_file_name_text.lower():
+                    file_type = ext
+                    break
+        if not file_type or file_type not in valid_book_extensions:
+            return "Wrong File Type"
 
         final_file_name = re.sub(r'[\\/*?:"<>|]', " ", f"{req_item['author']} - {req_item['book_name']}")
 
