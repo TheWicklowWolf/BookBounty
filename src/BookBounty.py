@@ -195,16 +195,13 @@ class DataHandler:
 
                         title = item["title"]
                         author_and_title = item["authorTitle"]
+                        series = item["seriesTitle"]
                         author_reversed = author_and_title.replace(title, "")
                         author_with_sep = author_reversed.split(", ")
                         author = "".join(reversed(author_with_sep)).title()
+                        year = item["releaseDate"][:4]
 
-                        new_item = {
-                            "author": author,
-                            "book_name": title,
-                            "checked": True,
-                            "status": "",
-                        }
+                        new_item = {"author": author, "book_name": title, "series": series, "checked": True, "status": "", "year": year}
                         self.readarr_items.append(new_item)
                     page += 1
                 else:
@@ -524,13 +521,34 @@ class DataHandler:
         if not file_type or file_type not in valid_book_extensions:
             return "Wrong File Type"
 
-        final_file_name = re.sub(r'[\\/*?:"<>|]', " ", f"{req_item['author']} - {req_item['book_name']}")
+        final_file_name = re.sub(r'[\\/*?:"<>|]', " ", f"{req_item['author']} - {req_item['book_name']} ({req_item['year']})")
 
         if self.selected_path_type == "file":
             file_path = os.path.join(self.download_folder, final_file_name + file_type)
 
         elif self.selected_path_type == "folder":
-            file_path = os.path.join(self.download_folder, req_item["author"], req_item["book_name"], req_item["author"] + " - " + req_item["author"] + file_type)
+            if req_item["series"]:
+                if ";" in req_item["series"]:
+                    series_string = req_item["series"].split(";")[0]
+                    series_name, series_number = series_string.split(" #", maxsplit=1)
+                else:
+                    series_name, series_number = req_item["series"].split(" #", maxsplit=1)
+
+                file_path = os.path.join(
+                    self.download_folder,
+                    req_item["author"],
+                    series_name,
+                    f"{series_number} - {req_item['book_name']} ({req_item['year']})",
+                    f"{series_number} - {series_name} - {req_item['author']} - {req_item['book_name']} ({req_item['year']}){file_type}",
+                )
+
+            else:
+                file_path = os.path.join(
+                    self.download_folder,
+                    req_item["author"],
+                    f"{req_item['book_name']} ({req_item['year']})",
+                    f"{req_item['author']} - {req_item['book_name']} ({req_item['year']}){file_type}",
+                )
 
         if os.path.exists(file_path):
             self.general_logger.info("File already exists: " + file_path)
