@@ -46,6 +46,23 @@ Certain values can be set via environment variables:
 * __preferred_extensions_fiction__: Filter fiction download by extension (comma separated). Defaults to `.epub, .mobi, .azw3, .djvu`.
 * __preferred_extensions_non_fiction__: Filter non-fiction download by extension (comma separated). Defaults to `.pdf .epub, .mobi, .azw3, .djvu`.
 
+
+## Readarr Integration
+
+You have two choices to integrate BookBounty with Readarr:
+
+1. Directly map `/bookbounty/downloads` to your main Readarr folder and configure `selected_path_type=folder`.   
+   This method will attempt to create the correct folder structure (`/author/book` etc.) and downloads files directly into their respective folders.
+
+2. Alternatively, map `/bookbounty/downloads` to an `_unprocessed` folder and set `selected_path_type=file`.
+   This method downloads all files into a single folder. After a library scan in Readarr, some files may remain unmapped and require manual import.
+   You can use Readarr's "rename files" function to organize them into the correct folders after importing..
+
+For both methods, setting `library_scan_on_completion=True` automates the import process in Readarr.
+
+**Note:** Readarr does not automatically rename files upon import.
+
+
 ---
 
 
