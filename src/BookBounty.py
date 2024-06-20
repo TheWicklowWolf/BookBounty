@@ -15,7 +15,7 @@ from libgen_api import LibgenSearch
 
 class DataHandler:
     def __init__(self):
-        logging.basicConfig(level=logging.WARNING, format="%(message)s")
+        logging.basicConfig(level=logging.INFO, format="%(message)s")
         self.general_logger = logging.getLogger()
 
         self.readarr_items = []
@@ -521,34 +521,37 @@ class DataHandler:
         if not file_type or file_type not in valid_book_extensions:
             return "Wrong File Type"
 
-        final_file_name = re.sub(r'[\\/*?:"<>|]', " ", f"{req_item['author']} - {req_item['book_name']} ({req_item['year']})")
+        cleaned_author_name = re.sub(r"\s{2,}", " ", re.sub(r'[\\*?:"<>|]', " - ", req_item["author"].replace("/", "+")))
+        cleaned_book_name = re.sub(r"\s{2,}", " ", re.sub(r'[\\*?:"<>|]', " - ", req_item["book_name"].replace("/", "+")))
 
         if self.selected_path_type == "file":
-            file_path = os.path.join(self.download_folder, final_file_name + file_type)
+            file_path = os.path.join(self.download_folder, f"{cleaned_author_name} - {cleaned_book_name} ({req_item['year']}){file_type}")
 
         elif self.selected_path_type == "folder":
-            if req_item["series"]:
-                if ";" in req_item["series"]:
-                    series_string = req_item["series"].split(";")[0]
-                    series_name, series_number = series_string.split(" #", maxsplit=1)
-                else:
-                    series_name, series_number = req_item["series"].split(" #", maxsplit=1)
+            path_elements = [self.download_folder, req_item["author"]]
 
-                file_path = os.path.join(
-                    self.download_folder,
-                    req_item["author"],
-                    series_name,
-                    f"{series_number} - {req_item['book_name']} ({req_item['year']})",
-                    f"{series_number} - {series_name} - {req_item['author']} - {req_item['book_name']} ({req_item['year']}){file_type}",
-                )
+            if req_item["series"]:
+                raw_series_string = req_item["series"].split(";")[0] if ";" in req_item["series"] else req_item["series"]
+
+                if " #" in raw_series_string:
+                    series_name, series_number = raw_series_string.split(" #", maxsplit=1)
+                    cleaned_series_name = re.sub(r"\s{2,}", " ", re.sub(r'[\\/*?:"<>|]', " - ", series_name.replace("/", "+")))
+                    path_elements.append(cleaned_series_name)
+                    path_elements.append(f"{series_number} - {cleaned_book_name} ({req_item['year']})")
+                    path_elements.append(f"{series_number} - {cleaned_series_name} - {cleaned_author_name} - {cleaned_book_name} ({req_item['year']}){file_type}")
+
+                else:
+                    series_name = raw_series_string.replace("/", "+")
+                    cleaned_series_name = re.sub(r"\s{2,}", " ", re.sub(r'[\\/*?:"<>|]', " - ", series_name))
+                    path_elements.append(cleaned_series_name)
+                    path_elements.append(f"{cleaned_book_name} ({req_item['year']})")
+                    path_elements.append(f"{series_name} - {cleaned_author_name} - {cleaned_book_name} ({req_item['year']}){file_type}")
 
             else:
-                file_path = os.path.join(
-                    self.download_folder,
-                    req_item["author"],
-                    f"{req_item['book_name']} ({req_item['year']})",
-                    f"{req_item['author']} - {req_item['book_name']} ({req_item['year']}){file_type}",
-                )
+                path_elements.append(f"{cleaned_book_name} ({req_item['year']})")
+                path_elements.append(f"{cleaned_author_name} - {cleaned_book_name} ({req_item['year']}){file_type}")
+
+            file_path = os.path.join(*path_elements)
 
         if os.path.exists(file_path):
             self.general_logger.info("File already exists: " + file_path)
@@ -565,7 +568,7 @@ class DataHandler:
             # Download file
             req_item["status"] = "Downloading"
             socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})
-            self.general_logger.info(f"Downloading: {final_file_name}")
+            self.general_logger.info(f"Downloading: {os.path.basename(file_path)}")
 
             with open(file_path, "wb") as f:
                 for chunk in dl_resp.iter_content(chunk_size=1024):
@@ -573,7 +576,7 @@ class DataHandler:
                         raise Exception("Cancelled")
                     f.write(chunk)
             if os.path.exists(file_path):
-                self.general_logger.info(f"Downloaded: {link_url} to {final_file_name}")
+                self.general_logger.info(f"Downloaded: {link_url} to {file_path}")
                 return "Success"
             else:
                 self.general_logger.info("Downloaded file not found in Directory")
@@ -581,7 +584,9 @@ class DataHandler:
         else:
             req_item["status"] = "Download Error"
             socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})
-            return str(dl_resp.status_code) + " : " + dl_resp.text
+            error_string = f"{dl_resp.status_code} : {dl_resp.text}"
+            self.general_logger.error(f"Error downloading: {os.path.basename(file_path)} - {error_string}")
+            return error_string
 
     def reset_readarr(self):
         self.readarr_stop_event.set()
