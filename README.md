@@ -35,7 +35,7 @@ Certain values can be set via environment variables:
 * __readarr_api_key__: The API key for Readarr. Defaults to ` `.
 * __libgen_address__: The URL for Library Genesis. Defaults to `http://libgen.is`.
 * __sleep_interval__: Interval to sleep between downloads (seconds). Defaults to `0`.
-* __sync_schedule__: Schedule times to run (comma seperated values in 24hr). Defaults to ` `.
+* __sync_schedule__: Scheduled hours to run e.g. 14 for 2pm (comma separated values in 24hr). Defaults to ` `.
 * __minimum_match_ratio__: Minimum percentage for a match. Defaults to `90`.
 * __selected_path_type__: Select Download Structure (file or folder). Defaults to `file`.
 * __search_type__: Select Search Type (fiction or non-fiction). Defaults to `fiction`.
@@ -56,7 +56,7 @@ You have two choices to integrate BookBounty with Readarr:
 
 2. Alternatively, map `/bookbounty/downloads` to an `_unprocessed` folder and set `selected_path_type=file`.
    This method downloads all files into a single folder. After a library scan in Readarr, some files may remain unmapped and require manual import.
-   You can use Readarr's "rename files" function to organize them into the correct folders after importing..
+   After importing, you can use the "**Rename Files**" function in Readarr to organize the files into the correct folders.
 
 For both methods, setting `library_scan_on_completion=True` automates the import process in Readarr.
 
