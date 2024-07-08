@@ -366,7 +366,7 @@ class DataHandler:
                     with self.libgen_thread_lock:
                         s = LibgenSearch()
                         title_filters = {"Author": author, "Language": self.selected_language}
-                        results = s.search_title_filtered(book_name, title_filters, exact_match=False)
+                        results = s.search_title_filtered(book_text, title_filters, exact_match=False)
 
                 except Exception as e:
                     self.general_logger.error(f"Error accessing libgen API: {str(e)}")
@@ -421,7 +421,7 @@ class DataHandler:
 
                             if file_type_check and language_check:
                                 author_name_match_ratio = self.compare_author_names(author, author_string)
-                                book_name_match_ratio = fuzz.ratio(title_string, book_name)
+                                book_name_match_ratio = fuzz.ratio(title_string, book_text)
                                 if author_name_match_ratio >= self.minimum_match_ratio and book_name_match_ratio >= self.minimum_match_ratio:
                                     mirrors = row.find("ul", class_="record_mirrors_compact")
                                     links = mirrors.find_all("a", href=True)
