@@ -60,6 +60,8 @@ class DataHandler:
             "selected_path_type": "file",
             "preferred_extensions_fiction": [".epub", ".mobi", ".azw3", ".djvu"],
             "preferred_extensions_non_fiction": [".pdf", ".epub", ".mobi", ".azw3", ".djvu"],
+            "search_last_name_only": False,
+            "search_shortened_title": False,
         }
 
         # Load settings from environmental variables (which take precedence) over the configuration file.
@@ -76,6 +78,10 @@ class DataHandler:
         self.search_type = os.environ.get("search_type", "")
         library_scan_on_completion = os.environ.get("library_scan_on_completion", "")
         self.library_scan_on_completion = library_scan_on_completion.lower() == "true" if library_scan_on_completion != "" else ""
+        search_last_name_only = os.environ.get("search_last_name_only", "")
+        self.search_last_name_only = search_last_name_only.lower() == "true" if search_last_name_only != "" else ""
+        search_shortened_title = os.environ.get("search_shortened_title", "")
+        self.search_shortened_title = search_shortened_title.lower() == "true" if search_shortened_title != "" else ""
         request_timeout = os.environ.get("request_timeout", "")
         self.request_timeout = float(request_timeout) if request_timeout else ""
         thread_limit = os.environ.get("thread_limit", "")
@@ -131,6 +137,8 @@ class DataHandler:
                         "selected_language": self.selected_language,
                         "preferred_extensions_fiction": self.preferred_extensions_fiction,
                         "preferred_extensions_non_fiction": self.preferred_extensions_non_fiction,
+                        "search_last_name_only": self.search_last_name_only,
+                        "search_shortened_title": self.search_shortened_title,
                     },
                     json_file,
                     indent=4,
@@ -346,7 +354,11 @@ class DataHandler:
             self.general_logger.warning(f'Searching for Book: {req_item["author"]} - {req_item["book_name"]}')
             author = req_item["author"]
             book_name = req_item["book_name"]
-            query_text = f"{author} - {book_name}"
+
+            author_text = f"{author.split(' ')[-1]}" if self.search_last_name_only else author
+            book_text = book_name.split(":")[0] if self.search_shortened_title else book_name
+            query_text = f"{author_text} - {book_text}"
+
             found_links = []
 
             if self.search_type.lower() == "non-fiction":
@@ -410,7 +422,7 @@ class DataHandler:
                             if file_type_check and language_check:
                                 author_name_match_ratio = self.compare_author_names(author, author_string)
                                 book_name_match_ratio = fuzz.ratio(title_string, book_name)
-                                if author_name_match_ratio > self.minimum_match_ratio and book_name_match_ratio > self.minimum_match_ratio:
+                                if author_name_match_ratio >= self.minimum_match_ratio and book_name_match_ratio >= self.minimum_match_ratio:
                                     mirrors = row.find("ul", class_="record_mirrors_compact")
                                     links = mirrors.find_all("a", href=True)
                                     for link in links:
