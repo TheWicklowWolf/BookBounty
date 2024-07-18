@@ -355,9 +355,9 @@ class DataHandler:
             author = req_item["author"]
             book_name = req_item["book_name"]
 
-            author_text = f"{author.split(' ')[-1]}" if self.search_last_name_only else author
-            book_text = book_name.split(":")[0] if self.search_shortened_title else book_name
-            query_text = f"{author_text} - {book_text}"
+            author_search_text = f"{author.split(' ')[-1]}" if self.search_last_name_only else author
+            book_search_text = book_name.split(":")[0] if self.search_shortened_title else book_name
+            query_text = f"{author_search_text} - {book_search_text}"
 
             found_links = []
 
@@ -365,17 +365,22 @@ class DataHandler:
                 try:
                     with self.libgen_thread_lock:
                         s = LibgenSearch()
-                        title_filters = {"Author": author, "Language": self.selected_language}
-                        results = s.search_title_filtered(book_text, title_filters, exact_match=False)
+                        title_filters = {"Language": self.selected_language}
+                        results = s.search_title_filtered(book_search_text, title_filters, exact_match=False)
+                        self.general_logger.warning(f"Found {len(results)} potential matches")
 
                 except Exception as e:
-                    self.general_logger.error(f"Error accessing libgen API: {str(e)}")
+                    self.general_logger.error(f"Error with libgen_api search library: {str(e)}")
                     results = None
 
-                if results:
-                    item_to_download = results[0]
-                    download_links = s.resolve_download_links(item_to_download)
-                    found_links = [value for value in download_links.values()]
+                for item in results:
+                    author_name_match_ratio = self.compare_author_names(item["Author"], author)
+                    book_name_match_ratio = fuzz.ratio(item["Title"], book_name)
+                    average_match_ratio = (author_name_match_ratio + book_name_match_ratio) / 2
+                    if average_match_ratio > self.minimum_match_ratio:
+                        download_links = s.resolve_download_links(item)
+                        found_links = [value for value in download_links.values()]
+                        break
                 else:
                     req_item["status"] = "No Link Found"
 
@@ -421,7 +426,7 @@ class DataHandler:
 
                             if file_type_check and language_check:
                                 author_name_match_ratio = self.compare_author_names(author, author_string)
-                                book_name_match_ratio = fuzz.ratio(title_string, book_text)
+                                book_name_match_ratio = fuzz.ratio(title_string, book_search_text)
                                 if author_name_match_ratio >= self.minimum_match_ratio and book_name_match_ratio >= self.minimum_match_ratio:
                                     mirrors = row.find("ul", class_="record_mirrors_compact")
                                     links = mirrors.find_all("a", href=True)
