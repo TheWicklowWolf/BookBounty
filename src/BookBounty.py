@@ -585,13 +585,25 @@ class DataHandler:
             # Download file
             req_item["status"] = "Downloading"
             socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})
-            self.general_logger.info(f"Downloading: {os.path.basename(file_path)}")
+
+            total_size = int(dl_resp.headers.get("content-length", 0))
+            downloaded_size = 0
+            chunk_counter = 0
+
+            self.general_logger.info(f"Downloading: {os.path.basename(file_path)} - Size: {total_size/1048576:.2f} MB")
 
             with open(file_path, "wb") as f:
                 for chunk in dl_resp.iter_content(chunk_size=1024):
                     if self.libgen_stop_event.is_set():
                         raise Exception("Cancelled")
                     f.write(chunk)
+                    downloaded_size += len(chunk)
+                    chunk_counter += 1
+
+                    if chunk_counter % 100 == 0:
+                        percent_completion = (downloaded_size / total_size) * 100 if total_size > 0 else 0
+                        self.general_logger.info(f"Downloading: {os.path.basename(file_path)} - Progress: {percent_completion:.2f}% complete")
+
             if os.path.exists(file_path):
                 self.general_logger.info(f"Downloaded: {link_url} to {file_path}")
                 return "Success"
