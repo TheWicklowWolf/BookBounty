@@ -602,7 +602,7 @@ class DataHandler:
 
                     if chunk_counter % 100 == 0:
                         percent_completion = (downloaded_size / total_size) * 100 if total_size > 0 else 0
-                        self.general_logger.info(f"Downloading: {os.path.basename(file_path)} - Progress: {percent_completion:.2f}% complete")
+                        self.general_logger.info(f"Downloading: {os.path.basename(file_path)} - Progress: {percent_completion:.2f}%")
 
             if os.path.exists(file_path):
                 self.general_logger.info(f"Downloaded: {link_url} to {file_path}")
