@@ -49,6 +49,12 @@ Certain values can be set via environment variables:
 * __search_shortened_title__: Use shortened title when searching (remove everything after `:`). Defaults to `False`.
 
 
+## Sync Schedule
+
+Use a comma-separated list of hours to start sync (e.g. `2, 20` will initiate a sync at 2 AM and 8 PM).
+> Note: There is a deadband of up to 10 minutes from the scheduled start time.
+
+
 ## Readarr Integration
 
 You have two choices to integrate BookBounty with Readarr:
