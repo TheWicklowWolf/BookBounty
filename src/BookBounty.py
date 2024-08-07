@@ -18,6 +18,12 @@ class DataHandler:
         logging.basicConfig(level=logging.INFO, format="%(message)s")
         self.general_logger = logging.getLogger()
 
+        app_name_text = os.path.basename(__file__).replace(".py", "")
+        release_version = os.environ.get("RELEASE_VERSION", "unknown")
+        self.general_logger.info(f"{'*' * 50}\n")
+        self.general_logger.info(f"{app_name_text} Version: {release_version}\n")
+        self.general_logger.info(f"{'*' * 50}")
+
         self.readarr_items = []
         self.readarr_futures = []
         self.readarr_status = "idle"
