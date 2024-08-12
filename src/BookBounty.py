@@ -108,6 +108,7 @@ class DataHandler:
                     for key in ret:
                         if getattr(self, key) == "":
                             setattr(self, key, ret[key])
+
         except Exception as e:
             self.general_logger.error(f"Error Loading Config: {str(e)}")
 
@@ -533,22 +534,24 @@ class DataHandler:
                 self.general_logger.info("File extension not in url or invalid, checking link content...")
 
         try:
-            dl_resp = requests.get(link_url, stream=True)        
+            download_response = requests.get(link_url, stream=True)
+
         except Exception as e:
             req_item["status"] = "Link Failed"
             socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})
-            error_string = f"Exception {e} thrown by: {link_url}"
-            self.general_logger.error(error_string)
+            self.general_logger.error(f"Exception {str(e)} thrown by: {link_url}")
             return "Link Failed"
-        
+
         if file_type == None or ".php" in file_type:
-            link_file_name_text = dl_resp.headers.get("content-disposition")
+            link_file_name_text = download_response.headers.get("content-disposition")
             if not link_file_name_text:
                 return "Unknown File Type"
+
             for ext in valid_book_extensions:
                 if ext in link_file_name_text.lower():
                     file_type = ext
                     break
+
         if not file_type or file_type not in valid_book_extensions:
             return "Wrong File Type"
 
@@ -595,19 +598,19 @@ class DataHandler:
         if self.libgen_stop_event.is_set():
             raise Exception("Cancelled")
 
-        if dl_resp.status_code == 200:
+        if download_response.status_code == 200:
             # Download file
             req_item["status"] = "Downloading"
             socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})
 
-            total_size = int(dl_resp.headers.get("content-length", 0))
+            total_size = int(download_response.headers.get("content-length", 0))
             downloaded_size = 0
             chunk_counter = 0
 
             self.general_logger.info(f"Downloading: {os.path.basename(file_path)} - Size: {total_size/1048576:.2f} MB")
 
             with open(file_path, "wb") as f:
-                for chunk in dl_resp.iter_content(chunk_size=1024):
+                for chunk in download_response.iter_content(chunk_size=1024):
                     if self.libgen_stop_event.is_set():
                         raise Exception("Cancelled")
                     f.write(chunk)
@@ -627,7 +630,7 @@ class DataHandler:
         else:
             req_item["status"] = "Download Error"
             socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})
-            error_string = f"{dl_resp.status_code} : {dl_resp.text}"
+            error_string = f"{download_response.status_code} : {download_response.text}"
             self.general_logger.error(f"Error downloading: {os.path.basename(file_path)} - {error_string}")
             return error_string
 
