@@ -532,7 +532,15 @@ class DataHandler:
                 file_type = None
                 self.general_logger.info("File extension not in url or invalid, checking link content...")
 
-        dl_resp = requests.get(link_url, stream=True)
+        try:
+            dl_resp = requests.get(link_url, stream=True)        
+        except Exception as e:
+            req_item["status"] = "Link Failed"
+            socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})
+            error_string = f"Exception {e} thrown by: {link_url}"
+            self.general_logger.error(error_string)
+            return "Link Failed"
+        
         if file_type == None or ".php" in file_type:
             link_file_name_text = dl_resp.headers.get("content-disposition")
             if not link_file_name_text:
