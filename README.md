@@ -33,7 +33,7 @@ Certain values can be set via environment variables:
 
 * __readarr_address__: The URL for Readarr. Defaults to `http://192.168.1.2:8787`.
 * __readarr_api_key__: The API key for Readarr. Defaults to ` `.
-* __libgen_address__: The URL for Library Genesis. Defaults to `http://libgen.is`.
+* __libgen_address__: The URL for Library Genesis. The only supported URL at present is `http://libgen.is`.
 * __sleep_interval__: Interval to sleep between downloads (seconds). Defaults to `0`.
 * __sync_schedule__: Scheduled hours to run e.g. 14 for 2pm (comma separated values in 24hr). Defaults to ` `.
 * __minimum_match_ratio__: Minimum percentage for a match. Defaults to `90`.
