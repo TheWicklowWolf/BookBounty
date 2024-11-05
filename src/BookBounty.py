@@ -623,6 +623,7 @@ class DataHandler:
                             percent_completion = (downloaded_size / total_size) * 100 if total_size > 0 else 0
                             self.general_logger.info(f"Downloading: {os.path.basename(file_path)} - Progress: {percent_completion:.2f}%")
 
+                self.general_logger.info(f"Moving temp file: {f.name} to final location: {file_path}")
                 shutil.move(f.name, file_path)
 
             except Exception as e:
