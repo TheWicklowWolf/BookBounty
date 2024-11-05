@@ -1,8 +1,10 @@
-import logging
 import os
 import re
 import time
 import json
+import shutil
+import logging
+import tempfile
 import threading
 import concurrent.futures
 import requests
@@ -609,17 +611,25 @@ class DataHandler:
 
             self.general_logger.info(f"Downloading: {os.path.basename(file_path)} - Size: {total_size/1048576:.2f} MB")
 
-            with open(file_path, "wb") as f:
-                for chunk in download_response.iter_content(chunk_size=1024):
-                    if self.libgen_stop_event.is_set():
-                        raise Exception("Cancelled")
-                    f.write(chunk)
-                    downloaded_size += len(chunk)
-                    chunk_counter += 1
+            try:
+                with tempfile.NamedTemporaryFile(delete=False) as f:
+                    for chunk in download_response.iter_content(chunk_size=1024):
+                        if self.libgen_stop_event.is_set():
+                            raise Exception("Cancelled")
+                        f.write(chunk)
+                        downloaded_size += len(chunk)
+                        chunk_counter += 1
+                        if chunk_counter % 100 == 0:
+                            percent_completion = (downloaded_size / total_size) * 100 if total_size > 0 else 0
+                            self.general_logger.info(f"Downloading: {os.path.basename(file_path)} - Progress: {percent_completion:.2f}%")
 
-                    if chunk_counter % 100 == 0:
-                        percent_completion = (downloaded_size / total_size) * 100 if total_size > 0 else 0
-                        self.general_logger.info(f"Downloading: {os.path.basename(file_path)} - Progress: {percent_completion:.2f}%")
+                shutil.move(f.name, file_path)
+
+            except Exception as e:
+                self.general_logger.error(f"Error downloading to temp file: {str(e)}")
+                if os.path.exists(f.name):
+                    os.remove(f.name)
+                    self.general_logger.info(f"Removed temp file: {f.name}")
 
             if os.path.exists(file_path):
                 self.general_logger.info(f"Downloaded: {link_url} to {file_path}")
