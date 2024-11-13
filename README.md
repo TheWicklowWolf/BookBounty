@@ -31,6 +31,8 @@ services:
 
 Certain values can be set via environment variables:
 
+* __PUID__: The user ID to run the app with. Defaults to `1000`. 
+* __PGID__: The group ID to run the app with. Defaults to `1000`.
 * __readarr_address__: The URL for Readarr. Defaults to `http://192.168.1.2:8787`.
 * __readarr_api_key__: The API key for Readarr. Defaults to ` `.
 * __libgen_address__: The URL for Library Genesis. The only supported URL at present is `http://libgen.is`.
