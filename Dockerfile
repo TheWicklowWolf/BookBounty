@@ -4,8 +4,8 @@ FROM python:3.12-alpine
 ARG RELEASE_VERSION
 ENV RELEASE_VERSION=${RELEASE_VERSION}
 
-# Install ffmpeg and su-exec
-RUN apk update && apk add --no-cache ffmpeg su-exec
+# Install su-exec
+RUN apk update && apk add --no-cache su-exec
 
 # Create directories and set permissions
 COPY . /bookbounty
