@@ -35,12 +35,10 @@ Certain values can be set via environment variables:
 * __PGID__: The group ID to run the app with. Defaults to `1000`.
 * __readarr_address__: The URL for Readarr. Defaults to `http://192.168.1.2:8787`.
 * __readarr_api_key__: The API key for Readarr. Defaults to ` `.
-* __libgen_address__: The URL for Library Genesis. The only supported URL at present is `http://libgen.is`.
 * __sleep_interval__: Interval to sleep between downloads (seconds). Defaults to `0`.
 * __sync_schedule__: Scheduled hours to run e.g. 14 for 2pm (comma separated values in 24hr). Defaults to ` `.
 * __minimum_match_ratio__: Minimum percentage for a match. Defaults to `90`.
 * __selected_path_type__: Select Download Structure (file or folder). Defaults to `file`.
-* __search_type__: Select Search Type (fiction or non-fiction). Defaults to `fiction`.
 * __library_scan_on_completion__: Whether to scan Readarr Library on completion. Defaults to `True`.
 * __request_timeout__: Timeout for requests (seconds). Defaults to `120`.
 * __thread_limit__: Max number of threads to use. Defaults to `1`.

@@ -17,7 +17,6 @@ var save_message = document.getElementById("save-message");
 var save_changes_button = document.getElementById("save-changes-btn");
 const readarr_address = document.getElementById("readarr-address");
 const readarr_api_key = document.getElementById("readarr-api-key");
-const search_type = document.getElementById("search-type");
 const sleep_interval = document.getElementById("sleep-interval");
 const sync_schedule = document.getElementById("sync-schedule");
 const minimum_match_ratio = document.getElementById("minimum-match-ratio");
@@ -100,7 +99,6 @@ config_modal.addEventListener('show.bs.modal', function (event) {
     function handle_settings_loaded(settings) {
         readarr_address.value = settings.readarr_address;
         readarr_api_key.value = settings.readarr_api_key;
-        search_type.value = settings.search_type;
         sleep_interval.value = settings.sleep_interval;
         sync_schedule.value = settings.sync_schedule.join(', ');
         minimum_match_ratio.value = settings.minimum_match_ratio;
@@ -113,7 +111,6 @@ save_changes_button.addEventListener("click", () => {
     socket.emit("update_settings", {
         "readarr_address": readarr_address.value,
         "readarr_api_key": readarr_api_key.value,
-        "search_type": search_type.value,
         "sleep_interval": sleep_interval.value,
         "sync_schedule": sync_schedule.value,
         "minimum_match_ratio": minimum_match_ratio.value
