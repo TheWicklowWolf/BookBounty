@@ -37,6 +37,17 @@ def file_search(torrent_info, desired_file):
         raise Exception("Destination file not found in torrent")
     return (fidx, size, path, priorities)
 
+def check_torrent_completion(ses, idx):
+    alerts = ses.pop_alerts()
+    for a in alerts:
+        alert_type = type(a).__name__
+        if (alert_type == "torrent_finished_alert" or
+            alert_type == "file_completed_alert"):
+            if a.index == idx:
+                return True
+
+    return False
+
 def get_torrent_from_listing(url, save_as):
     page = re.get(url)
     tree = html.fromstring(page.content)
@@ -94,18 +105,6 @@ class aaclient:
         self.logger = logger
         self.qbitt_client = qbitt_client
 
-    def check_torrent_completion(self, ses, idx):
-        alerts = ses.pop_alerts()
-        for a in alerts:
-            alert_type = type(a).__name__
-            if (alert_type == "torrent_finished_alert" or
-                alert_type == "file_completed_alert" or
-                alert_type == "torrent_finished_alert"):
-                if a.index == idx:
-                    return True
-
-        return False
-
     def hnr_download_torrent(self, t_path, desired_file, save_filename, save_path, allotted_time=600):
         info = lt.torrent_info(t_path)
         ses = lt.session({'listen_interfaces': '0.0.0.0:6881'})
@@ -140,7 +139,7 @@ class aaclient:
                 old_prog = prog
                 time_out = 0
 
-            if (self.check_torrent_completion(ses, idx) or
+            if (check_torrent_completion(ses, idx) or
                 (prog >= size and
                  s.state == lt.torrent_status.finished and
                  s.finished_duration > 30)):
@@ -150,7 +149,7 @@ class aaclient:
                     os.remove(f)
                 self.logger.info(f"Torrented: {t_path} to {new_path}")
                 return "Success"
-            
+
         msg = f"Gave up or timed out Torrent for {save_filename}."
         self.logger.warning(msg)
         return "Timed out HnR torrenting"
@@ -182,10 +181,10 @@ class aaclient:
 
     def qb_download_torrent(self, t_path, hash, desired_file, save_filename):
         conn_info = dict(
-        host=self.qbitt_client["host"],
-        port=self.qbitt_client["port"],
-        username=self.qbitt_client["username"],
-        password=self.qbitt_client["password"],
+            host=self.qbitt_client["host"],
+            port=self.qbitt_client["port"],
+            username=self.qbitt_client["username"],
+            password=self.qbitt_client["password"],
         )
 
         qb = qbittorrentapi.Client(**conn_info)
