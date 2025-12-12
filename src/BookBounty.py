@@ -389,6 +389,9 @@ class DataHandler:
             except Exception as e:
                 self.general_logger.error(f"Error Downloading: {str(e)}")
                 req_item["status"] = "Download Error"
+                
+        if req_item["status"] == "Searching...":
+            req_item["status"] = "Not Found"
 
         self.index += 1
         self.percent_completion = 100 * (self.index / len(self.libgen_items)) if self.libgen_items else 0
@@ -647,23 +650,25 @@ class DataHandler:
             if response.status_code == 200:
                 parsetext = response.text.replace(("<!--"), '').replace("-->", '')
                 soup = BeautifulSoup(parsetext, "html.parser")
-                books = soup.find("div", {"id":"aarecord-list"})
-                rows = books.select("a")
+                books = soup.find("div", {"class":"js-aarecord-list-outer"})
+                rows = books.find_all("div", {"class":["max-w-full", "overflow-hidden"]})
                 for potential_book in rows:
                     try:
                         try:
-                            title_string = potential_book.find("h3").get_text().strip()
+                            title_elem = potential_book.find("a", {"class":"font-semibold"})
+                            title_string = title_elem.get_text().strip()
                         except:
                             title_string = ""
                             
-                        try:
-                            author_string = potential_book.find("div", {"class" :"italic"}).get_text().strip()
+                        try: 
+                            # there are multiple line-clamp-[2] classes but author is first
+                            author_string = potential_book.find("a", {"class" :"line-clamp-[2]"}).get_text().strip()
                         except:
                             author_string = ""
                         
                         try:
                             # contains language and file type
-                            info = potential_book.find("div", {"class" :"text-gray-500"}).get_text().strip()
+                            info = potential_book.find("div", {"class" :"text-gray-800"}).get_text().strip()
                         except:
                             info = "english"
                             
@@ -674,7 +679,7 @@ class DataHandler:
                             author_name_match_ratio = self.compare_author_names(author, author_string)
                             book_name_match_ratio = fuzz.ratio(title_string, book_search_text)
                             if author_name_match_ratio >= self.minimum_match_ratio and book_name_match_ratio >= self.minimum_match_ratio:
-                                href = potential_book["href"]
+                                href = title_elem["href"]
                                 if href.startswith("/md5"):
                                     found_links.append(f"http://annas-archive.org{href}")
                     except:
@@ -851,18 +856,17 @@ class DataHandler:
             self.general_logger.error(f"Error downloading: {os.path.basename(file_path)} - {error_string}")
             return error_string
         
-        socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})
-        
         if isAnna and self.aaclient is not None:
             try:
-                req_item["status"] = "Torrenting"                
-                if self.aaclient.torrent_from_bookbounty(link, os.path.basename(file_path), os.path.dirname(file_path)):
-                    return "Success"
+                req_item["status"] = "Torrenting"
+                socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})         
+                return self.aaclient.torrent_from_bookbounty(link, os.path.basename(file_path), os.path.dirname(file_path))
             except Exception as e:
                 self.general_logger.error(f"Error downloading from Anna: {str(e)}")
                 
         elif download_response.status_code == 200:
             req_item["status"] = "Downloading"
+            socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})
             total_size = int(download_response.headers.get("content-length", 0))
             downloaded_size = 0
             chunk_counter = 0
