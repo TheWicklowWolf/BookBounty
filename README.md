@@ -1,3 +1,35 @@
+
+<div align="right">
+  <details>
+    <summary >🌐 Language</summary>
+    <div>
+      <div align="center">
+        <a href="https://openaitx.github.io/view.html?user=TheWicklowWolf&project=BookBounty&lang=en">English</a>
+        | <a href="https://openaitx.github.io/view.html?user=TheWicklowWolf&project=BookBounty&lang=zh-CN">简体中文</a>
+        | <a href="https://openaitx.github.io/view.html?user=TheWicklowWolf&project=BookBounty&lang=zh-TW">繁體中文</a>
+        | <a href="https://openaitx.github.io/view.html?user=TheWicklowWolf&project=BookBounty&lang=ja">日本語</a>
+        | <a href="https://openaitx.github.io/view.html?user=TheWicklowWolf&project=BookBounty&lang=ko">한국어</a>
+        | <a href="https://openaitx.github.io/view.html?user=TheWicklowWolf&project=BookBounty&lang=hi">हिन्दी</a>
+        | <a href="https://openaitx.github.io/view.html?user=TheWicklowWolf&project=BookBounty&lang=th">ไทย</a>
+        | <a href="https://openaitx.github.io/view.html?user=TheWicklowWolf&project=BookBounty&lang=fr">Français</a>
+        | <a href="https://openaitx.github.io/view.html?user=TheWicklowWolf&project=BookBounty&lang=de">Deutsch</a>
+        | <a href="https://openaitx.github.io/view.html?user=TheWicklowWolf&project=BookBounty&lang=es">Español</a>
+        | <a href="https://openaitx.github.io/view.html?user=TheWicklowWolf&project=BookBounty&lang=it">Italiano</a>
+        | <a href="https://openaitx.github.io/view.html?user=TheWicklowWolf&project=BookBounty&lang=ru">Русский</a>
+        | <a href="https://openaitx.github.io/view.html?user=TheWicklowWolf&project=BookBounty&lang=pt">Português</a>
+        | <a href="https://openaitx.github.io/view.html?user=TheWicklowWolf&project=BookBounty&lang=nl">Nederlands</a>
+        | <a href="https://openaitx.github.io/view.html?user=TheWicklowWolf&project=BookBounty&lang=pl">Polski</a>
+        | <a href="https://openaitx.github.io/view.html?user=TheWicklowWolf&project=BookBounty&lang=ar">العربية</a>
+        | <a href="https://openaitx.github.io/view.html?user=TheWicklowWolf&project=BookBounty&lang=fa">فارسی</a>
+        | <a href="https://openaitx.github.io/view.html?user=TheWicklowWolf&project=BookBounty&lang=tr">Türkçe</a>
+        | <a href="https://openaitx.github.io/view.html?user=TheWicklowWolf&project=BookBounty&lang=vi">Tiếng Việt</a>
+        | <a href="https://openaitx.github.io/view.html?user=TheWicklowWolf&project=BookBounty&lang=id">Bahasa Indonesia</a>
+        | <a href="https://openaitx.github.io/view.html?user=TheWicklowWolf&project=BookBounty&lang=as">অসমীয়া</
+      </div>
+    </div>
+  </details>
+</div>
+
 # BookBounty
 
 ![Build Status](https://github.com/TheWicklowWolf/BookBounty/actions/workflows/main.yml/badge.svg)
