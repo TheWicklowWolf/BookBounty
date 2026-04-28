@@ -105,7 +105,7 @@ class aaclient:
         self.logger = logger
         self.qbitt_client = qbitt_client
 
-    def hnr_download_torrent(self, t_path, desired_file, save_filename, save_path, allotted_time=600):
+    def hnr_download_torrent(self, t_path, desired_file, save_filename, save_path, allotted_time=600, progress_callback=None):
         info = lt.torrent_info(t_path)
         ses = lt.session({'listen_interfaces': '0.0.0.0:6881'})
 
@@ -138,6 +138,8 @@ class aaclient:
             if prog != old_prog:
                 old_prog = prog
                 time_out = 0
+                if progress_callback and size > 0:
+                    progress_callback(prog / size * 100)
 
             if (check_torrent_completion(ses, idx) or
                 (prog >= size and
@@ -211,7 +213,7 @@ class aaclient:
 
         return "Failed to add to qBittorrent"
 
-    def torrent_from_bookbounty(self, link, save_as, save_path):
+    def torrent_from_bookbounty(self, link, save_as, save_path, progress_callback=None):
         path, fname, save_as = self.dl_torrent_from_listing(link, save_as)
 
         hash, num_files = self.get_torrent_hash_and_num_files(path)
@@ -226,4 +228,4 @@ class aaclient:
             else:
                 return self.qb_download_torrent(path, hash, fname, save_as)
 
-        return self.hnr_download_torrent(path, fname, save_as, save_path)
+        return self.hnr_download_torrent(path, fname, save_as, save_path, progress_callback=progress_callback)

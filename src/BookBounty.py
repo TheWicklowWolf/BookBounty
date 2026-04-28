@@ -862,8 +862,13 @@ class DataHandler:
         if isAnna and self.aaclient is not None:
             try:
                 req_item["status"] = "Torrenting"
-                socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})         
-                return self.aaclient.torrent_from_bookbounty(link, os.path.basename(file_path), os.path.dirname(file_path))
+                socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})
+
+                def hnr_progress(percent):
+                    req_item["status"] = f"Torrenting {percent:.0f}%"
+                    socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})
+
+                return self.aaclient.torrent_from_bookbounty(link, os.path.basename(file_path), os.path.dirname(file_path), progress_callback=hnr_progress)
             except Exception as e:
                 self.general_logger.error(f"Error downloading from Anna: {str(e)}")
                 
