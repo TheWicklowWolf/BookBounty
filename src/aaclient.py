@@ -144,7 +144,8 @@ class aaclient:
             if (check_torrent_completion(ses, idx) or
                 (prog >= size and
                  s.state == lt.torrent_status.finished and
-                 s.finished_duration > 30)):
+                 s.finished_duration > 30) or
+                (prog >= size and time_out >= 60)):
                 new_path = save_path + "/" + save_filename
                 os.renames(save_path + "/" + path, new_path)
                 for f in glob.glob(save_path + "/.*.parts"):
