@@ -64,6 +64,7 @@ class DataHandler:
             "request_timeout": 120.0,
             "libgen_address_one": "http://libgen.is",
             "libgen_address_two": "http://libgen.li",
+            "aa_address": "http://annas-archive.gl/",
             "thread_limit": 1,
             "sleep_interval": 0,
             "library_scan_on_completion": True,
@@ -105,6 +106,7 @@ class DataHandler:
         preferred_extensions_non_fiction = os.environ.get("preferred_extensions_non_fiction", "")
         self.preferred_extensions_non_fiction = preferred_extensions_non_fiction.split(",") if preferred_extensions_non_fiction else ""
         self.aa_client_type = os.environ.get("aa_client_type", "")
+        self.aa_address = os.environ.get("aa_address", "")
 
         # Load variables from the configuration file if not set by environmental variables.
         try:
@@ -156,6 +158,7 @@ class DataHandler:
                         "search_last_name_only": self.search_last_name_only,
                         "search_shortened_title": self.search_shortened_title,
                         "aa_client_type": self.aa_client_type,
+                        "aa_address": self.aa_address,
                     },
                     json_file,
                     indent=4,
@@ -645,7 +648,7 @@ class DataHandler:
 
             found_links = []
             search_item = query_text.replace(" ", "+")
-            url = f"http://annas-archive.org/search?index=&q={search_item}"
+            url = f"{self.aa_address.rstrip('/')}/search?index=&q={search_item}"
             response = requests.get(url, timeout=self.request_timeout)
             if response.status_code == 200:
                 parsetext = response.text.replace(("<!--"), '').replace("-->", '')
@@ -681,7 +684,7 @@ class DataHandler:
                             if author_name_match_ratio >= self.minimum_match_ratio and book_name_match_ratio >= self.minimum_match_ratio:
                                 href = title_elem["href"]
                                 if href.startswith("/md5"):
-                                    found_links.append(f"http://annas-archive.org{href}")
+                                    found_links.append(f"{self.aa_address.rstrip('/')}{href}")
                     except:
                         pass
 
@@ -859,8 +862,13 @@ class DataHandler:
         if isAnna and self.aaclient is not None:
             try:
                 req_item["status"] = "Torrenting"
-                socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})         
-                return self.aaclient.torrent_from_bookbounty(link, os.path.basename(file_path), os.path.dirname(file_path))
+                socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})
+
+                def hnr_progress(percent):
+                    req_item["status"] = f"Torrenting {percent:.0f}%"
+                    socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})
+
+                return self.aaclient.torrent_from_bookbounty(link, os.path.basename(file_path), os.path.dirname(file_path), progress_callback=hnr_progress)
             except Exception as e:
                 self.general_logger.error(f"Error downloading from Anna: {str(e)}")
                 
