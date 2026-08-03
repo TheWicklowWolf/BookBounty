@@ -938,6 +938,9 @@ class DataHandler:
                         time.sleep(RETRY_DELAY)
                     except Exception as e: 
                         self.general_logger.error(f"Error downloading to temp file: {str(e)}")
+                        if os.path.exists(f.name):
+                            os.remove(f.name)
+                            self.general_logger.info(f"Removed temp file: {f.name}")
                         raise
 
             self.general_logger.info(f"Moving temp file: {f.name} to final location: {file_path}")
