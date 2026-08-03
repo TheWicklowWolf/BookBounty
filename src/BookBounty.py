@@ -788,7 +788,8 @@ class DataHandler:
 
         if not isAnna:
             try:
-                download_response = requests.get(link_url, stream=True)
+                session = requests.Session()
+                download_response = session.get(link_url, stream=True)
 
             except Exception as e:
                 req_item["status"] = "Link Failed"
@@ -881,26 +882,66 @@ class DataHandler:
 
             self.general_logger.info(f"Downloading: {os.path.basename(file_path)} - Size: {total_size/1048576:.2f} MB")
 
-            try:
-                with tempfile.NamedTemporaryFile(delete=False) as f:
-                    for chunk in download_response.iter_content(chunk_size=1024):
-                        if self.libgen_stop_event.is_set():
-                            raise Exception("Cancelled")
-                        f.write(chunk)
-                        downloaded_size += len(chunk)
-                        chunk_counter += 1
-                        if chunk_counter % 100 == 0:
-                            percent_completion = (downloaded_size / total_size) * 100 if total_size > 0 else 0
-                            self.general_logger.info(f"Downloading: {os.path.basename(file_path)} - Progress: {percent_completion:.2f}%")
+            MAX_CONSECUTIVE_FAILURES = 5
+            consecutive_failures = 0
+            RESET_PROGRESS = 3 * 1024 * 1024  # 3 MB
+            progress_since_reset = 0
+            RETRY_DELAY = 5
+            with tempfile.NamedTemporaryFile(delete=False) as f:
+                while True:
+                    try:
+                        # Resume from where we left off
+                        headers = {}
+                        if downloaded_size > 0:
+                            headers["Range"] = f"bytes={downloaded_size}-"
+                            download_response = session.get(
+                                link_url,
+                                headers=headers,
+                                stream=True
+                            )
+                        if downloaded_size > 0 and download_response.status_code != 206:
+                            raise Exception("Server does not support resume downloads")
+                        
+                        for chunk in download_response.iter_content(chunk_size=1024):
+                            if not chunk:
+                                continue
 
-                self.general_logger.info(f"Moving temp file: {f.name} to final location: {file_path}")
-                shutil.move(f.name, file_path)
+                            if self.libgen_stop_event.is_set():
+                                raise Exception("Cancelled")
 
-            except Exception as e:
-                self.general_logger.error(f"Error downloading to temp file: {str(e)}")
-                if os.path.exists(f.name):
-                    os.remove(f.name)
-                    self.general_logger.info(f"Removed temp file: {f.name}")
+                            f.write(chunk)
+                            downloaded_size += len(chunk)
+                            progress_since_reset += len(chunk)
+                            if progress_since_reset >= RESET_PROGRESS:
+                                consecutive_failures = 0
+                                progress_since_reset = 0
+                            chunk_counter += 1
+                            if chunk_counter % 100 == 0:                            
+                                percent_completion = (downloaded_size / total_size) * 100 if total_size > 0 else 0
+                                self.general_logger.info(f"Downloading: {os.path.basename(file_path)} - Progress: {percent_completion:.2f}%")
+                        break
+
+                    except (
+                        requests.exceptions.Timeout,
+                        requests.exceptions.ConnectionError,
+                        requests.exceptions.ChunkedEncodingError,
+                    ) as e:
+                        consecutive_failures += 1
+                        if consecutive_failures > MAX_CONSECUTIVE_FAILURES:
+                            raise Exception(f"Download failed after {MAX_CONSECUTIVE_FAILURES} consecutive connection errors.") from e
+
+                        self.general_logger.warning(
+                            f"Connection lost ({e}). "
+                            f"Retrying in {RETRY_DELAY}s "
+                            f"({consecutive_failures}/{MAX_CONSECUTIVE_FAILURES})..."
+                        )
+                        time.sleep(RETRY_DELAY)
+                    except Exception as e: 
+                        self.general_logger.error(f"Error downloading to temp file: {str(e)}")
+                        raise
+
+            self.general_logger.info(f"Moving temp file: {f.name} to final location: {file_path}")
+            shutil.move(f.name, file_path)
 
         if os.path.exists(file_path):
             self.general_logger.info(f"Downloaded: {link_url} to {file_path}")
