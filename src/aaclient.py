@@ -105,7 +105,7 @@ class aaclient:
         self.logger = logger
         self.qbitt_client = qbitt_client
 
-    def hnr_download_torrent(self, t_path, desired_file, save_filename, save_path, allotted_time=600, progress_callback=None):
+    def hnr_download_torrent(self, t_path, desired_file, save_filename, save_path, allotted_time=3600, progress_callback=None):
         info = lt.torrent_info(t_path)
         ses = lt.session({'listen_interfaces': '0.0.0.0:6881'})
 
@@ -122,21 +122,31 @@ class aaclient:
         self.logger.info(f"Torrenting: {save_filename} - Size: {size/1048576:.2f} MB")
         os.remove(t_path)
 
-        # default time allotment without progress is 10 minutes (600 seconds)
         time_out = 0
         increments = 10 #seconds
+        max_increment = max(allotted_time / 5, 300)
         old_prog = 0
         while (allotted_time == 0 or time_out < allotted_time):
             s = h.status()
             prog = h.file_progress()[idx]
-            msg = f"Torrent - {prog} - {state_str[s.state]} ({s.num_peers} {'peer' if s.num_peers == 1 else 'peers'})"
+            msg = (
+                f"Torrent {save_filename} - {prog} bytes "
+                f"({s.progress * 100:.2f}% complete, "
+                f"down: {s.download_rate / 1000:.1f} kB/s, "
+                f"up: {s.upload_rate / 1000:.1f} kB/s) - "
+                f"{state_str[s.state]} "
+                f"({s.num_peers} {'peer' if s.num_peers == 1 else 'peers'})"
+                f"({s.num_seeds} {'seed' if s.num_seeds == 1 else 'seeds'})"
+            )
             if s.state == lt.torrent_status.finished:
                 msg += f" - finished state for {s.finished_duration} seconds"
             self.logger.info(msg)
             time.sleep(increments)
             time_out += increments
+            increments = min(increments * 2, max_increment)
             if prog != old_prog:
                 old_prog = prog
+                increments = 10
                 time_out = 0
                 if progress_callback and size > 0:
                     progress_callback(prog / size * 100)
