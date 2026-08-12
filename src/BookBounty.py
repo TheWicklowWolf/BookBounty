@@ -354,62 +354,70 @@ class DataHandler:
             socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})
             socketio.emit("new_toast_msg", {"title": "End of Session", "message": f"Downloading {self.libgen_status.capitalize()}"})
 
-    def find_link_and_download(self, req_item, manual_link=None):
-        if manual_link:
-            ret = self.download_from_mirror(req_item, manual_link)
-            if ret == "Success":
-                req_item["status"] = "Download Complete"
-            elif ret == "Already Exists":
-                req_item["status"] = "File Already Exists"
-            else:
-                req_item["status"] = ret
-            return
-
-        finder_functions = [
-            self._link_finder_annas_archive,
-            self._link_finder_libgen_li,
-            self._link_finder_libgen_api, 
-            self._link_finder_libgen_is, 
-            ]
-        
-        for func in finder_functions:
-            try:                
-                self.is_using_libgen_api = False
-                req_item["status"] = "Searching..."
-                socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})
-                search_results = func(req_item)
-                if self.libgen_stop_event.is_set():
-                    return
-
-                if search_results:
-                    req_item["status"] = "Link Found"
-                    socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})
-                    for link in search_results:
-                        ret = self.download_from_mirror(req_item, link)
-                        if ret == "Success":
-                            req_item["status"] = "Download Complete"
-                            break
-                        elif ret == "Already Exists":
-                            req_item["status"] = "File Already Exists"
-                            break
-                    else:
-                        req_item["status"] = ret
-            
-                if req_item["status"] == "Download Complete":
-                    break
-                elif req_item["status"] == "File Already Exists":
-                    break
-
-            except Exception as e:
-                self.general_logger.error(f"Error Downloading: {str(e)}")
-                req_item["status"] = "Download Error"
-                
+    def _finalize_download_result(self, req_item):
         if req_item["status"] == "Searching...":
             req_item["status"] = "Not Found"
 
         self.index += 1
         self.percent_completion = 100 * (self.index / len(self.libgen_items)) if self.libgen_items else 0
         socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})
+
+    def find_link_and_download(self, req_item, manual_link=None):
+        try:
+            if manual_link:
+                ret = self.download_from_mirror(req_item, manual_link)
+                if ret == "Success":
+                    req_item["status"] = "Download Complete"
+                elif ret == "Already Exists":
+                    req_item["status"] = "File Already Exists"
+                else:
+                    req_item["status"] = ret
+                return
+
+            finder_functions = [
+                self._link_finder_annas_archive,
+                self._link_finder_libgen_li,
+                self._link_finder_libgen_api, 
+                self._link_finder_libgen_is, 
+            ]
+        
+            for func in finder_functions:
+                try:
+                    self.is_using_libgen_api = False
+                    req_item["status"] = "Searching..."
+                    socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})
+                    search_results = func(req_item)
+                    if self.libgen_stop_event.is_set():
+                        return
+
+                    if search_results:
+                        req_item["status"] = "Link Found"
+                        socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})
+                        for link in search_results:
+                            ret = self.download_from_mirror(req_item, link)
+                            if ret == "Success":
+                                req_item["status"] = "Download Complete"
+                                break
+                            elif ret == "Already Exists":
+                                req_item["status"] = "File Already Exists"
+                                break
+                        else:
+                            req_item["status"] = ret
+
+                    if req_item["status"] == "Download Complete":
+                        break
+                    elif req_item["status"] == "File Already Exists":
+                        break
+
+                except Exception as e:
+                    self.general_logger.error(f"Error Downloading: {str(e)}")
+                    req_item["status"] = "Download Error"
+
+            if req_item["status"] == "Searching...":
+                req_item["status"] = "Not Found"
+
+        finally:
+            self._finalize_download_result(req_item)
 
     def _link_finder_libgen_api(self, req_item):
         try:
