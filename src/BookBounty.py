@@ -330,7 +330,8 @@ class DataHandler:
                     for req_item in self.libgen_items[start_position:]:
                         if self.libgen_stop_event.is_set():
                             break
-                        self.libgen_futures.append(executor.submit(self.find_link_and_download, req_item))
+                        manual_link = req_item.get("manual_link", None)
+                        self.libgen_futures.append(executor.submit(self.find_link_and_download, req_item, manual_link))
                     concurrent.futures.wait(self.libgen_futures)
 
             if self.libgen_stop_event.is_set():
@@ -353,7 +354,17 @@ class DataHandler:
             socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})
             socketio.emit("new_toast_msg", {"title": "End of Session", "message": f"Downloading {self.libgen_status.capitalize()}"})
 
-    def find_link_and_download(self, req_item):
+    def find_link_and_download(self, req_item, manual_link=None):
+        if manual_link:
+            ret = self.download_from_mirror(req_item, manual_link)
+            if ret == "Success":
+                req_item["status"] = "Download Complete"
+            elif ret == "Already Exists":
+                req_item["status"] = "File Already Exists"
+            else:
+                req_item["status"] = ret
+            return
+
         finder_functions = [
             self._link_finder_annas_archive,
             self._link_finder_libgen_li,
@@ -1131,7 +1142,40 @@ def update_settings(data):
     data_handler.update_settings(data)
     data_handler.save_config_to_file()
 
+@socketio.on("manual_download")
+def manual_download(data):
+    try:
+        link = data["link"]
+        item = data["item"]
+        item["manual_link"] = link
+        item["status"] = "Queued"
+        
+        # Add to libgen items if not already there
+        if item not in data_handler.libgen_items:
+            data_handler.libgen_items.append(item)
+        
+        # Start download thread if not already running
+        if data_handler.libgen_in_progress_flag == False:
+            data_handler.libgen_stop_event.clear()
+            data_handler.index = 0
+            data_handler.libgen_in_progress_flag = True
+            
+            def manual_download_thread():
+                status = data_handler.download_from_mirror(item, link)
+                data_handler.libgen_in_progress_flag = False
+                socketio.emit("libgen_update", {"status": status, "data": data_handler.libgen_items, "percent_completion": 100})
+            
+            thread = threading.Thread(target=manual_download_thread, name="Manual_Download_Thread")
+            thread.daemon = True
+            thread.start()
+        
+        socketio.emit("libgen_update", {"status": data_handler.libgen_status, "data": data_handler.libgen_items, "percent_completion": data_handler.percent_completion})
+        socketio.emit("new_toast_msg", {"title": "Manual Download Queued", "message": f"{item['author']} - {item['book_name']}"})
+        
+    except Exception as e:
+        data_handler.general_logger.error(f"Error in manual download: {str(e)}")
+        socketio.emit("new_toast_msg", {"title": "Manual Download Error", "message": str(e)})
 
 if __name__ == "__main__":
-    socketio.run(app, host="0.0.0.0", port=5000)
+    socketio.run(app, host="0.0.0.0", port=int(os.getenv("APP_PORT", "5000")))
 
