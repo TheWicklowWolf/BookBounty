@@ -1,21 +1,23 @@
+import concurrent.futures
+import json
+import logging
 import os
 import re
-import time
-import json
 import shutil
-import logging
 import tempfile
 import threading
-import concurrent.futures
+import time
+import urllib.parse
+
 import iso639
 import requests
-from src.aaclient import aaclient
+from bs4 import BeautifulSoup
 from flask import Flask, render_template
 from flask_socketio import SocketIO
-from bs4 import BeautifulSoup
-from thefuzz import fuzz
 from libgen_api import LibgenSearch
-import urllib.parse
+from thefuzz import fuzz
+
+from src.aaclient import aaclient
 
 class DataHandler:
     def __init__(self):
@@ -29,18 +31,17 @@ class DataHandler:
         self.general_logger.info(f"{'*' * 50}")
 
         self.readarr_items = []
-        self.readarr_futures = []
         self.readarr_status = "idle"
         self.readarr_stop_event = threading.Event()
 
+        self.executor = None
+        self.libgen_items_lock = threading.Lock()
         self.libgen_items = []
         self.libgen_futures = []
         self.libgen_status = "idle"
         self.libgen_stop_event = threading.Event()
-        self.libgen_thread_lock = threading.Lock()
+        self.libgen_api_thread_lock = threading.Lock()
 
-        self.libgen_in_progress_flag = False        
-        self.is_using_libgen_api = False
         self.index = 0
         self.percent_completion = 0
 
@@ -291,76 +292,93 @@ class DataHandler:
         else:
             self.general_logger.warning(f"Readarr library scan started")
 
+    def get_executor(self):
+        if self.executor is None:
+            self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=self.thread_limit)
+        return self.executor
+
     def add_items_to_download(self, data):
         try:
             self.libgen_stop_event.clear()
-            if self.libgen_status == "complete" or self.libgen_status == "stopped":
+            if self.libgen_status in ("complete", "stopped"):
                 self.libgen_items = []
                 self.percent_completion = 0
+
             for i in range(len(self.readarr_items)):
                 if i in data:
-                    self.readarr_items[i]["status"] = "Queued"
-                    self.readarr_items[i]["checked"] = True
-                    self.libgen_items.append(self.readarr_items[i])
+                    item = self.readarr_items[i]
+                    with self.libgen_items_lock:
+                        if item in self.libgen_items:
+                            continue
+                        item["status"] = "Queued"
+                        item["checked"] = True
+                        self.libgen_items.append(item)
+
+                    manual_link = item.get("manual_link")
+                    future = self.get_executor().submit(
+                        self.find_link_and_download, item, manual_link
+                    )
+                    future.add_done_callback(self.download_finished)
+                    self.libgen_futures.append(future)
                 else:
                     self.readarr_items[i]["checked"] = False
 
-            if self.libgen_in_progress_flag == False:
-                self.index = 0
-                self.libgen_in_progress_flag = True
-                thread = threading.Thread(target=self.master_queue, name="Queue_Thread")
-                thread.daemon = True
-                thread.start()
+            self.libgen_status = "running"
 
         except Exception as e:
             self.general_logger.error(f"Error Adding Items to Download: {str(e)}")
-            socketio.emit("new_toast_msg", {"title": "Error adding new items", "message": str(e)})
+
+            socketio.emit(
+                "new_toast_msg", {"title": "Error adding new items", "message": str(e)}
+            )
 
         finally:
-            socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})
-            socketio.emit("new_toast_msg", {"title": "Download Queue Updated", "message": "New Items added to Queue"})
+            socketio.emit(
+                "libgen_update",
+                {
+                    "status": self.libgen_status,
+                    "data": self.libgen_items,
+                    "percent_completion": self.percent_completion,
+                },
+            )
+            socketio.emit(
+                "new_toast_msg",
+                {
+                    "title": "Download Queue Updated",
+                    "message": "New Items added to Queue",
+                },
+            )
 
-    def master_queue(self):
+    def download_finished(self, future):
         try:
-            while not self.libgen_stop_event.is_set() and self.index < len(self.libgen_items):
-                self.libgen_status = "running"
-                with concurrent.futures.ThreadPoolExecutor(max_workers=self.thread_limit) as executor:
-                    self.libgen_futures = []
-                    start_position = self.index
-                    for req_item in self.libgen_items[start_position:]:
-                        if self.libgen_stop_event.is_set():
-                            break
-                        manual_link = req_item.get("manual_link", None)
-                        self.libgen_futures.append(executor.submit(self.find_link_and_download, req_item, manual_link))
-                    concurrent.futures.wait(self.libgen_futures)
+            future.result()
+        except Exception as e:
+            self.general_logger.error(f"Download thread failed: {e}")
+        finally:
+            try:
+                self.libgen_futures.remove(future)
+            except ValueError:
+                pass
 
             if self.libgen_stop_event.is_set():
                 self.libgen_status = "stopped"
                 self.general_logger.warning("Downloading Stopped")
                 self.libgen_in_progress_flag = False
-            else:
+            elif self.libgen_futures == []:
                 self.libgen_status = "complete"
                 self.general_logger.warning("Downloading Finished")
                 self.libgen_in_progress_flag = False
                 if self.library_scan_on_completion:
                     self.trigger_readarr_scan()
 
-        except Exception as e:
-            self.general_logger.error(f"Error in Master Queue: {str(e)}")
-            self.libgen_status = "failed"
-            socketio.emit("new_toast_msg", {"title": "Error in Master Queue", "message": str(e)})
-
-        finally:
-            socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})
-            socketio.emit("new_toast_msg", {"title": "End of Session", "message": f"Downloading {self.libgen_status.capitalize()}"})
-
-    def _finalize_download_result(self, req_item):
-        if req_item["status"] == "Searching...":
-            req_item["status"] = "Not Found"
-
-        self.index += 1
-        self.percent_completion = 100 * (self.index / len(self.libgen_items)) if self.libgen_items else 0
-        socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})
+            socketio.emit(
+                "libgen_update",
+                {
+                    "status": self.libgen_status,
+                    "data": self.libgen_items,
+                    "percent_completion": self.percent_completion,
+                },
+            )
 
     def find_link_and_download(self, req_item, manual_link=None):
         try:
@@ -380,14 +398,15 @@ class DataHandler:
                 self._link_finder_libgen_api, 
                 self._link_finder_libgen_is, 
             ]
-        
+
             for func in finder_functions:
                 try:
-                    self.is_using_libgen_api = False
+                    req_item["is_using_libgen_api"] = False
                     req_item["status"] = "Searching..."
                     socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})
                     search_results = func(req_item)
                     if self.libgen_stop_event.is_set():
+                        req_item["status"] = "Download Stopped"
                         return
 
                     if search_results:
@@ -413,12 +432,13 @@ class DataHandler:
                     self.general_logger.error(f"Error Downloading: {str(e)}")
                     req_item["status"] = "Download Error"
 
+        finally:        
             if req_item["status"] == "Searching...":
                 req_item["status"] = "Not Found"
 
-        finally:
-            self._finalize_download_result(req_item)
-
+            self.index += 1
+            self.percent_completion = min(100, 100 * (self.index / len(self.libgen_items)) if self.libgen_items else 0)
+       
     def _link_finder_libgen_api(self, req_item):
         try:
             self.general_logger.warning(f'Searching API for Book: {req_item["author"]} - {req_item["book_name"]} - Allowed Languages: {",".join(req_item["allowed_languages"])}')
@@ -429,7 +449,7 @@ class DataHandler:
             found_links = []
 
             try:
-                with self.libgen_thread_lock:
+                with self.libgen_api_thread_lock:
                     s = LibgenSearch()
                     results = s.search_title(book_search_text)
                     self.general_logger.warning(f"Found {len(results)} potential matches")
@@ -455,7 +475,7 @@ class DataHandler:
             raise Exception(f"Error Searching libgen API: {str(e)}")
 
         finally:
-            self.is_using_libgen_api = True
+            req_item["is_using_libgen_api"] = True
             return found_links
 
     def _link_finder_libgen_is(self, req_item):
@@ -645,7 +665,7 @@ class DataHandler:
                 self.general_logger.error("Libgen Connection Error: " + str(response.status_code) + " Data: " + response.text)
                 req_item["status"] = "Libgen Error"
                 socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})
-        
+
         except Exception as e:
             self.general_logger.error(f"Error Searching {self.libgen_address_two}: {str(e)}")
             raise Exception(f"Error Searching {self.libgen_address_two}: {str(e)}")
@@ -681,19 +701,19 @@ class DataHandler:
                             title_string = title_elem.get_text().strip()
                         except:
                             title_string = ""
-                            
+
                         try: 
                             # there are multiple line-clamp-[2] classes but author is first
                             author_string = potential_book.find("a", {"class" :"line-clamp-[2]"}).get_text().strip()
                         except:
                             author_string = ""
-                        
+
                         try:
                             # contains language and file type
                             info = potential_book.find("div", {"class" :"text-gray-800"}).get_text().strip()
                         except:
                             info = "english"
-                            
+
                         file_type_check = any(ft.replace(".", "").lower() in info.lower() for ft in self.preferred_extensions_fiction)
                         language_check = any(l.lower() in info.lower() for l in req_item["allowed_languages"]) or self.selected_language.lower() == "all"
 
@@ -715,14 +735,14 @@ class DataHandler:
                 self.general_logger.error("Libgen Connection Error: " + str(response.status_code) + " Data: " + response.text)
                 req_item["status"] = "Libgen Error"
                 socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})
-        
+
         except Exception as e:
             self.general_logger.error(f"Error Searching annas-archive: {str(e)}")
             raise Exception(f"Error Searching annas-archive: {str(e)}")
 
         finally:
             return found_links
-    
+
     def compare_author_names(self, author, author_string):
         try:
             processed_author = self.preprocess(author)
@@ -747,12 +767,12 @@ class DataHandler:
 
         req_item["status"] = "Checking Link"
         socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})
-        
+
         isAnna = False
         if "annas-archive" in link:
             isAnna = True
             file_type = "" # determined in aaclient.py  
-        elif self.is_using_libgen_api:
+        elif req_item["is_using_libgen_api"]:
             valid_book_extensions = self.preferred_extensions_non_fiction
             link_url = link
             try:
@@ -794,7 +814,7 @@ class DataHandler:
 
                 else:
                     return str(response.status_code) + " : " + response.text
-            
+
             except:
                 return "Dead Link"
 
@@ -878,7 +898,7 @@ class DataHandler:
             error_string = f"{download_response.status_code} : {download_response.text}"
             self.general_logger.error(f"Error downloading: {os.path.basename(file_path)} - {error_string}")
             return error_string
-        
+
         if isAnna and self.aaclient is not None:
             try:
                 req_item["status"] = "Torrenting"
@@ -891,7 +911,7 @@ class DataHandler:
                 return self.aaclient.torrent_from_bookbounty(link, os.path.basename(file_path), os.path.dirname(file_path), progress_callback=hnr_progress)
             except Exception as e:
                 self.general_logger.error(f"Error downloading from Anna: {str(e)}")
-                
+
         elif download_response.status_code == 200:
             req_item["status"] = "Downloading"
             socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})
@@ -920,7 +940,7 @@ class DataHandler:
                             )
                         if downloaded_size > 0 and download_response.status_code != 206:
                             raise Exception("Server does not support resume downloads")
-                        
+
                         for chunk in download_response.iter_content(chunk_size=1024):
                             if not chunk:
                                 continue
@@ -974,17 +994,18 @@ class DataHandler:
 
     def reset_readarr(self):
         self.readarr_stop_event.set()
-        for future in self.readarr_futures:
-            if not future.done():
-                future.cancel()
         self.readarr_items = []
+
+    def _stop_libgen(self):
+        self.libgen_stop_event.set()
+        for future in self.libgen_futures:
+            if not future.done():
+                future.cancel()        
+        self.libgen_futures = []
 
     def stop_libgen(self):
         try:
-            self.libgen_stop_event.set()
-            for future in self.libgen_futures:
-                if not future.done():
-                    future.cancel()
+            self._stop_libgen()
             for x in self.libgen_items[self.index :]:
                 x["status"] = "Download Stopped"
 
@@ -997,11 +1018,9 @@ class DataHandler:
 
     def reset_libgen(self):
         try:
-            self.libgen_stop_event.set()
-            for future in self.libgen_futures:
-                if not future.done():
-                    future.cancel()
+            self._stop_libgen()
             self.libgen_items = []
+            self.index = 0
             self.percent_completion = 0
 
         except Exception as e:
@@ -1031,7 +1050,7 @@ class DataHandler:
             if self.aa_client_type.lower() == "hnr":
                 self.aaclient = aaclient(self.general_logger)
                 return
-            
+
             if "qbittorrent" != self.aa_client_type.lower():
                 self.aaclient = None
                 return
@@ -1052,12 +1071,11 @@ class DataHandler:
                             if "name" in fields and "value" in fields:
                                 download_client[fields["name"]] = fields["value"]                
                         self.aaclient = aaclient(self.general_logger, download_client)
-                
+
         except Exception as e:
             self.general_logger.error(f"Failed to update aaclient_settings: {str(e)}")
             self.aaclient = None
 
-   
     def parse_sync_schedule(self, input_string):
         try:
             ret = []
@@ -1157,32 +1175,40 @@ def manual_download(data):
         item = data["item"]
         item["manual_link"] = link
         item["status"] = "Queued"
-        
-        # Add to libgen items if not already there
-        if item not in data_handler.libgen_items:
+
+        with data_handler.libgen_items_lock:
             data_handler.libgen_items.append(item)
-        
-        # Start download thread if not already running
-        if data_handler.libgen_in_progress_flag == False:
-            data_handler.libgen_stop_event.clear()
-            data_handler.index = 0
-            data_handler.libgen_in_progress_flag = True
-            
-            def manual_download_thread():
-                status = data_handler.download_from_mirror(item, link)
-                data_handler.libgen_in_progress_flag = False
-                socketio.emit("libgen_update", {"status": status, "data": data_handler.libgen_items, "percent_completion": 100})
-            
-            thread = threading.Thread(target=manual_download_thread, name="Manual_Download_Thread")
-            thread.daemon = True
-            thread.start()
-        
-        socketio.emit("libgen_update", {"status": data_handler.libgen_status, "data": data_handler.libgen_items, "percent_completion": data_handler.percent_completion})
-        socketio.emit("new_toast_msg", {"title": "Manual Download Queued", "message": f"{item['author']} - {item['book_name']}"})
-        
+        socketio.emit(
+            "new_toast_msg",
+            {
+                "title": "Manual Download Queued",
+                "message": f"{item['author']} - {item['book_name']}",
+            },
+        )
+
+        future = data_handler.get_executor().submit(
+            data_handler.find_link_and_download, item, link
+        )
+        future.add_done_callback(data_handler.download_finished)
+        data_handler.libgen_futures.append(future)
+        data_handler.libgen_status = "running"
+
     except Exception as e:
         data_handler.general_logger.error(f"Error in manual download: {str(e)}")
-        socketio.emit("new_toast_msg", {"title": "Manual Download Error", "message": str(e)})
+        socketio.emit(
+            "new_toast_msg", {"title": "Manual Download Error", "message": str(e)}
+        )
+
+    finally:
+        socketio.emit(
+            "libgen_update",
+            {
+                "status": data_handler.libgen_status,
+                "data": data_handler.libgen_items,
+                "percent_completion": data_handler.percent_completion,
+            },
+        )
+
 
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=int(os.getenv("APP_PORT", "5000")))
