@@ -309,7 +309,10 @@ class DataHandler:
                     item = self.readarr_items[i]
                     with self.libgen_items_lock:
                         if item in self.libgen_items:
-                            continue
+                            if "Error" not in item["status"] and item["status"] not in ("Not Found"):
+                                continue
+                            self.libgen_items.remove(item)
+                            self.index = max(0, self.index - 1)
                         item["status"] = "Queued"
                         item["checked"] = True
                         self.libgen_items.append(item)
