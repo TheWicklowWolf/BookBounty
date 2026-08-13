@@ -404,7 +404,6 @@ class DataHandler:
 
             for func in finder_functions:
                 try:
-                    req_item["is_using_libgen_api"] = False
                     req_item["status"] = "Searching..."
                     socketio.emit("libgen_update", {"status": self.libgen_status, "data": self.libgen_items, "percent_completion": self.percent_completion})
                     search_results = func(req_item)
@@ -775,7 +774,7 @@ class DataHandler:
         if "annas-archive" in link:
             isAnna = True
             file_type = "" # determined in aaclient.py  
-        elif req_item["is_using_libgen_api"]:
+        elif req_item.get("is_using_libgen_api", False):
             valid_book_extensions = self.preferred_extensions_non_fiction
             link_url = link
             try:
