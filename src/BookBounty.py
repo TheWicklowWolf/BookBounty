@@ -980,8 +980,6 @@ class DataHandler:
                 file_type = os.path.splitext(link_url)[1]
             except:
                 file_type = None
-        elif link.endswith(".epub"): #this is a specified manual dl
-            file_type = ".epub"
         else:
             try:
                 soup = self._get_soup_from_request(link)
