@@ -78,6 +78,7 @@
                         </div>
                       </th>
                       <th class="w-100 text-start">Wanted Book List</th>
+                      <th class="text-center table-header-small">Manual Specify</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -204,6 +205,9 @@
       <div class="toast-body"></div>
     </div>
   </div>
+
+  <!-- Manual Link Modal -->
+  {% include 'manual_link.html' %}
 
   <script src="{{url_for('static',filename='script.js')}}"></script>
 </body>

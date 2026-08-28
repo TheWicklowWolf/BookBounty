@@ -1,0 +1,34 @@
+<div class="modal fade" id="manual-link-modal" tabindex="-1" role="dialog" aria-labelledby="manualLinkLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div>
+                    <h5 class="modal-title" id="manualLinkLabel">Manual Download</h5>
+                    <small id="manual-link-book-info" class="text-muted"></small>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-danger" role="alert">
+                    <strong>⚠️ Warning - No Verification:</strong> The link you provide will not be verified or validated. It
+                    could be completely unrelated to the book you are trying to download. Please ensure you are providing a valid link to the correct book.
+                </div>
+                <div class="alert alert-warning" role="alert">
+                    <strong>⚠️ Readarr Compatibility:</strong> Readarr may not properly recognize or handle books downloaded through manual links. This could result in duplicate entries, import errors, or files not being tracked correctly.
+                </div>
+                <div class="alert alert-info" role="alert">
+                    <strong>ℹ️ Best Practice:</strong> Ensure the link points to the direct download link (<i>Download now</i> button on Anna's Archive or <i>GET</i> button on Libgen). 
+                    You can also provide an md5 book link on Anna's Archive or a Libgen mirror, if you are skipping the validation and your requests are not being blocked.
+                </div>
+                <div class="mb-3">
+                    <label for="manual-link-input" class="form-label">Download Link:</label>
+                    <input type="text" class="form-control" id="manual-link-input" placeholder="Enter the download link here...">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-warning" id="manual-link-confirm-btn">I Understand, Proceed</button>
+            </div>
+        </div>
+    </div>
+</div>

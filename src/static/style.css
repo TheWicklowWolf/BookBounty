@@ -8,6 +8,9 @@
     overflow-y: auto;
     height: 65vh;
 }
+.table-header-small {
+    font-size: 0.7rem;
+}
 .thead-sticky {
     position: sticky;
     top: 0;

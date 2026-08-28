@@ -18,6 +18,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN chmod +x thewicklowwolf-init.sh
 
 # Expose port
+ENV APP_PORT=5000
 EXPOSE 5000
 
 # Start the app

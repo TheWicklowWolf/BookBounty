@@ -24,6 +24,10 @@ const sync_schedule = document.getElementById("sync-schedule");
 const minimum_match_ratio = document.getElementById("minimum-match-ratio");
 var socket = io();
 
+// Initialize the manual link modal
+var manual_link_modal = new bootstrap.Modal(document.getElementById('manual-link-modal'));
+var current_manual_item = null;
+
 readarr_progress_bar.style.width = "0%";
 readarr_progress_bar.setAttribute("aria-valuenow", 0);
 
@@ -173,6 +177,7 @@ socket.on("readarr_update", (response) => {
 
         var cell1 = row.insertCell(0);
         var cell2 = row.insertCell(1);
+        var cell3 = row.insertCell(2);
 
         var checkbox = document.createElement("input");
         checkbox.type = "checkbox";
@@ -189,10 +194,58 @@ socket.on("readarr_update", (response) => {
         label.htmlFor = "readarr_" + i;
         label.textContent = `${item.author} - ${item.book_name}`;
 
+        var manual_link_button = document.createElement("button");
+        manual_link_button.type = "button";
+        manual_link_button.className = "btn btn-sm btn-secondary";
+        var icon = i % 2 === 0 ? '/static/anna_logo.ico' : '/static/libgen.ico';
+        manual_link_button.innerHTML = '<img src="' + new URL(icon, window.location.origin).href + '" alt="Manual Download" style="width: 16px; height: 16px;">';
+        manual_link_button.style.padding = "4px 8px";
+        manual_link_button.addEventListener("click", function () {
+            show_manual_link_dialog(item);
+        });
+
         cell1.appendChild(checkbox);
         cell2.appendChild(label);
+        cell3.appendChild(manual_link_button);
     });
     select_all_checkbox.checked = all_checked;
+});
+
+function show_manual_link_dialog(item) {
+    current_manual_item = item;
+    var manual_link_input = document.getElementById('manual-link-input');
+    var manual_link_book_info = document.getElementById('manual-link-book-info');
+
+    manual_link_book_info.textContent = `${item.author} - ${item.book_name}`;
+    manual_link_input.value = '';
+    manual_link_input.focus();
+
+    manual_link_modal.show();
+}
+
+document.getElementById('manual-link-confirm-btn').addEventListener('click', function () {
+    var link = document.getElementById('manual-link-input').value.trim();
+    
+    if (link === '') {
+        alert('Please enter a link');
+        return;
+    }
+    
+    if (!link.startsWith('http://') && !link.startsWith('https://')) {
+        alert('Please enter a valid URL starting with http:// or https://');
+        return;
+    }
+    
+    socket.emit("manual_download", { "item": current_manual_item, "link": link });
+    manual_link_modal.hide();
+    current_manual_item = null;
+});
+
+// Allow Enter key to submit
+document.getElementById('manual-link-input').addEventListener('keypress', function (e) {
+    if (e.key === 'Enter') {
+        document.getElementById('manual-link-confirm-btn').click();
+    }
 });
 
 socket.on("libgen_update", (response) => {
